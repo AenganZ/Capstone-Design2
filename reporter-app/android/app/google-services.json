@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "527805312261",
+    "project_id": "missing-person-alert-94fcd",
+    "storage_bucket": "missing-person-alert-94fcd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:527805312261:android:a02b1eec78485eda0d9b6c",
+        "android_client_info": {
+          "package_name": "com.aenganz.reporter"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAfWT0ETs0gwl1sqkWLX3Y4OvreVkkJblY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

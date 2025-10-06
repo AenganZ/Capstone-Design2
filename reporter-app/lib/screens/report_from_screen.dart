@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import 'dart:convert';
 import 'dart:io';
-import '../models/missing_report.dart';
 import '../services/api_service.dart';
 import '../widgets/photo_selector_widget.dart';
-import '../widgets/custom_text_field.dart';
 
 class ReportFormScreen extends StatefulWidget {
   const ReportFormScreen({super.key});
@@ -16,255 +14,167 @@ class ReportFormScreen extends StatefulWidget {
 }
 
 class _ReportFormScreenState extends State<ReportFormScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _pageController = PageController();
+  final PageController _pageController = PageController();
   int _currentPage = 0;
-  bool _isSubmitting = false;
+  final int _totalPages = 4;
 
-  // 실종자 정보
+  final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _ageController = TextEditingController();
-  String? _selectedGender;
   final _missingLocationController = TextEditingController();
-  DateTime? _missingDateTime;
   final _descriptionController = TextEditingController();
-  final _additionalInfoController = TextEditingController();
-
-  // 신고자 정보
   final _reporterNameController = TextEditingController();
   final _reporterPhoneController = TextEditingController();
+
+  String? _selectedGender;
   String? _selectedRelation;
+  DateTime? _missingDateTime;
+  XFile? _selectedPhoto;
+  bool _isSubmitting = false;
+  bool _agreeToPoliciy = false;
 
-  // 사진
-  File? _selectedPhoto;
-  String? _photoBase64;
-
-  final List<String> _genderOptions = ['남자', '여자'];
+  final List<String> _genderOptions = ['남성', '여성'];
   final List<String> _relationOptions = [
-    '가족', '친구', '지인', '이웃', '기타'
+    '본인',
+    '배우자',
+    '부모',
+    '자녀',
+    '형제자매',
+    '친척',
+    '지인',
+    '기타'
   ];
 
   @override
   void dispose() {
+    _pageController.dispose();
     _nameController.dispose();
     _ageController.dispose();
     _missingLocationController.dispose();
     _descriptionController.dispose();
-    _additionalInfoController.dispose();
     _reporterNameController.dispose();
     _reporterPhoneController.dispose();
-    _pageController.dispose();
     super.dispose();
-  }
-
-  void _nextPage() {
-    if (_currentPage < 2) {
-      if (_validateCurrentPage()) {
-        _pageController.nextPage(
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-        );
-      }
-    } else {
-      _submitReport();
-    }
-  }
-
-  void _previousPage() {
-    if (_currentPage > 0) {
-      _pageController.previousPage(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
-    }
-  }
-
-  bool _validateCurrentPage() {
-    switch (_currentPage) {
-      case 0:
-        return _validateMissingPersonInfo();
-      case 1:
-        return _validateReporterInfo();
-      case 2:
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  bool _validateMissingPersonInfo() {
-    if (_nameController.text.trim().isEmpty) {
-      _showSnackBar('실종자 이름을 입력해주세요', isError: true);
-      return false;
-    }
-    if (_missingLocationController.text.trim().isEmpty) {
-      _showSnackBar('실종 장소를 입력해주세요', isError: true);
-      return false;
-    }
-    if (_missingDateTime == null) {
-      _showSnackBar('실종 일시를 선택해주세요', isError: true);
-      return false;
-    }
-    if (_descriptionController.text.trim().isEmpty) {
-      _showSnackBar('실종 상황을 입력해주세요', isError: true);
-      return false;
-    }
-    return true;
-  }
-
-  bool _validateReporterInfo() {
-    if (_reporterNameController.text.trim().isEmpty) {
-      _showSnackBar('신고자 이름을 입력해주세요', isError: true);
-      return false;
-    }
-    if (_reporterPhoneController.text.trim().isEmpty) {
-      _showSnackBar('신고자 연락처를 입력해주세요', isError: true);
-      return false;
-    }
-    if (_selectedRelation == null) {
-      _showSnackBar('실종자와의 관계를 선택해주세요', isError: true);
-      return false;
-    }
-    return true;
-  }
-
-  Future<void> _selectDateTime() async {
-    final date = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now().subtract(const Duration(hours: 1)),
-      firstDate: DateTime.now().subtract(const Duration(days: 30)),
-      lastDate: DateTime.now(),
-      locale: const Locale('ko', 'KR'),
-    );
-
-    if (date != null && mounted) {
-      final time = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay.fromDateTime(DateTime.now().subtract(const Duration(hours: 1))),
-      );
-
-      if (time != null) {
-        setState(() {
-          _missingDateTime = DateTime(
-            date.year,
-            date.month,
-            date.day,
-            time.hour,
-            time.minute,
-          );
-        });
-      }
-    }
-  }
-
-  void _onPhotoSelected(File? photo, String? base64) {
-    setState(() {
-      _selectedPhoto = photo;
-      _photoBase64 = base64;
-    });
-  }
-
-  Future<void> _submitReport() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-
-    setState(() {
-      _isSubmitting = true;
-    });
-
-    try {
-      final report = MissingReport(
-        name: _nameController.text.trim(),
-        age: _ageController.text.isNotEmpty ? int.tryParse(_ageController.text) : null,
-        gender: _selectedGender,
-        missingLocation: _missingLocationController.text.trim(),
-        missingDateTime: _missingDateTime!.toIso8601String(),
-        description: _descriptionController.text.trim(),
-        reporterName: _reporterNameController.text.trim(),
-        reporterPhone: _reporterPhoneController.text.trim(),
-        reporterRelation: _selectedRelation!,
-        photoBase64: _photoBase64,
-        additionalInfo: _additionalInfoController.text.trim().isNotEmpty 
-            ? _additionalInfoController.text.trim() 
-            : null,
-      );
-
-      final result = await ApiService.submitMissingReport(report);
-      
-      if (mounted) {
-        Navigator.pushReplacementNamed(
-          context,
-          '/confirmation',
-          arguments: {
-            'reportId': result['report_id'],
-            'message': result['message'],
-          },
-        );
-      }
-    } on ApiException catch (e) {
-      _showSnackBar(e.message, isError: true);
-    } catch (e) {
-      _showSnackBar('알 수 없는 오류가 발생했습니다', isError: true);
-    } finally {
-      setState(() {
-        _isSubmitting = false;
-      });
-    }
-  }
-
-  void _showSnackBar(String message, {bool isError = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isError ? const Color(0xFFEF4444) : const Color(0xFF10B981),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
-        title: const Text('실종자 신고'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(8),
-          child: LinearProgressIndicator(
-            value: (_currentPage + 1) / 3,
-            backgroundColor: Colors.white.withOpacity(0.3),
-            valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+        elevation: 0,
+        backgroundColor: const Color(0xFF1E40AF),
+        foregroundColor: Colors.white,
+        title: const Text(
+          '실종자 신고',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Text(
+                '${_currentPage + 1}/$_totalPages',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
           ),
-        ),
+        ],
       ),
-      body: Form(
-        key: _formKey,
-        child: PageView(
-          controller: _pageController,
-          onPageChanged: (page) {
-            setState(() {
-              _currentPage = page;
-            });
-          },
-          children: [
-            _buildMissingPersonInfoPage(),
-            _buildReporterInfoPage(),
-            _buildPhotoAndReviewPage(),
-          ],
-        ),
+      body: Column(
+        children: [
+          _buildProgressIndicator(),
+          Expanded(
+            child: PageView(
+              controller: _pageController,
+              onPageChanged: (index) {
+                setState(() {
+                  _currentPage = index;
+                });
+              },
+              children: [
+                _buildBasicInfoPage(),
+                _buildDetailInfoPage(),
+                _buildPhotoAndReviewPage(),
+                _buildSubmissionPage(),
+              ],
+            ),
+          ),
+        ],
       ),
       bottomNavigationBar: _buildBottomNavigation(),
     );
   }
 
-  Widget _buildMissingPersonInfoPage() {
+  Widget _buildProgressIndicator() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      color: Colors.white,
+      child: Column(
+        children: [
+          Row(
+            children: List.generate(_totalPages, (index) {
+              final isActive = index <= _currentPage;
+              final isCompleted = index < _currentPage;
+              
+              return Expanded(
+                child: Container(
+                  height: 4,
+                  margin: EdgeInsets.only(
+                    right: index < _totalPages - 1 ? 4 : 0,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isCompleted
+                        ? const Color(0xFF10B981)
+                        : isActive
+                            ? const Color(0xFF1E40AF)
+                            : const Color(0xFFE5E7EB),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              );
+            }),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _getPageTitle(_currentPage),
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF374151),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getPageTitle(int page) {
+    switch (page) {
+      case 0:
+        return '기본 정보 입력';
+      case 1:
+        return '상세 정보 입력';
+      case 2:
+        return '사진 등록 및 확인';
+      case 3:
+        return '신고 접수';
+      default:
+        return '';
+    }
+  }
+
+  Widget _buildBasicInfoPage() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            '실종자 정보',
+            '실종자 기본 정보',
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -280,134 +190,82 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
             ),
           ),
           const SizedBox(height: 24),
-
-          CustomTextField(
+          
+          _buildTextField(
             controller: _nameController,
-            label: '실종자 이름*',
-            hint: '실종자의 이름을 입력하세요',
-            maxLength: 50,
+            label: '실종자 이름',
+            isRequired: true,
+            validator: (value) {
+              if (value == null || value.isEmpty) {
+                return '실종자 이름을 입력해주세요';
+              }
+              return null;
+            },
           ),
           const SizedBox(height: 16),
 
-          Row(
-            children: [
-              Expanded(
-                child: CustomTextField(
-                  controller: _ageController,
-                  label: '나이',
-                  hint: '만 나이',
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(3),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _selectedGender,
-                  decoration: const InputDecoration(
-                    labelText: '성별',
-                  ),
-                  items: _genderOptions.map((gender) {
-                    return DropdownMenuItem(
-                      value: gender,
-                      child: Text(gender),
-                    );
-                  }).toList(),
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedGender = value;
-                    });
-                  },
-                ),
-              ),
-            ],
+          _buildTextField(
+            controller: _ageController,
+            label: '나이',
+            isRequired: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            validator: (value) {
+              if (value == null || value.isEmpty) {
+                return '나이를 입력해주세요';
+              }
+              final age = int.tryParse(value);
+              if (age == null || age < 0 || age > 120) {
+                return '올바른 나이를 입력해주세요';
+              }
+              return null;
+            },
           ),
           const SizedBox(height: 16),
 
-          CustomTextField(
+          _buildDropdownField(
+            label: '성별',
+            value: _selectedGender,
+            items: _genderOptions,
+            onChanged: (value) {
+              setState(() {
+                _selectedGender = value;
+              });
+            },
+            validator: (value) {
+              if (value == null || value.isEmpty) {
+                return '성별을 선택해주세요';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 16),
+
+          _buildTextField(
             controller: _missingLocationController,
-            label: '실종 장소*',
-            hint: '실종된 장소를 구체적으로 입력하세요',
+            label: '실종 장소',
+            isRequired: true,
             maxLines: 2,
-          ),
-          const SizedBox(height: 16),
-
-          InkWell(
-            onTap: _selectDateTime,
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                border: Border.all(color: const Color(0xFFD1D5DB)),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.access_time, color: Color(0xFF6B7280)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          '실종 일시*',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Color(0xFF6B7280),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _missingDateTime != null
-                              ? DateFormat('yyyy년 MM월 dd일 HH:mm').format(_missingDateTime!)
-                              : '실종 일시를 선택하세요',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: _missingDateTime != null
-                                ? const Color(0xFF1F2937)
-                                : const Color(0xFF9CA3AF),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          CustomTextField(
-            controller: _descriptionController,
-            label: '실종 상황 설명*',
-            hint: '실종 당시 상황, 특징, 착용 의복 등을 자세히 설명해주세요',
-            maxLines: 4,
-            maxLength: 500,
-          ),
-          const SizedBox(height: 16),
-
-          CustomTextField(
-            controller: _additionalInfoController,
-            label: '추가 정보',
-            hint: '기타 특이사항이나 도움이 될 수 있는 정보를 입력하세요',
-            maxLines: 3,
-            maxLength: 300,
+            validator: (value) {
+              if (value == null || value.isEmpty) {
+                return '실종 장소를 입력해주세요';
+              }
+              return null;
+            },
           ),
         ],
       ),
     );
   }
 
-  Widget _buildReporterInfoPage() {
+  Widget _buildDetailInfoPage() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            '신고자 정보',
+            '상세 정보 및 신고자 정보',
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -416,7 +274,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
           ),
           const SizedBox(height: 8),
           const Text(
-            '신고자의 정보를 입력해주세요',
+            '실종 상황과 신고자 정보를 입력해주세요',
             style: TextStyle(
               fontSize: 16,
               color: Color(0xFF6B7280),
@@ -424,37 +282,62 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
           ),
           const SizedBox(height: 24),
 
-          CustomTextField(
-            controller: _reporterNameController,
-            label: '신고자 이름*',
-            hint: '신고자의 이름을 입력하세요',
-            maxLength: 50,
-          ),
+          _buildDateTimeField(),
           const SizedBox(height: 16),
 
-          CustomTextField(
-            controller: _reporterPhoneController,
-            label: '연락처*',
-            hint: '010-0000-0000',
-            keyboardType: TextInputType.phone,
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9-]')),
-              LengthLimitingTextInputFormatter(13),
-            ],
+          _buildTextField(
+            controller: _descriptionController,
+            label: '상세 설명',
+            isRequired: false,
+            maxLines: 4,
+            hintText: '실종 당시 착용한 옷, 특징, 상황 등을 자세히 설명해주세요',
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
 
-          DropdownButtonFormField<String>(
-            value: _selectedRelation,
-            decoration: const InputDecoration(
-              labelText: '실종자와의 관계*',
+          const Text(
+            '신고자 정보',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1F2937),
             ),
-            items: _relationOptions.map((relation) {
-              return DropdownMenuItem(
-                value: relation,
-                child: Text(relation),
-              );
-            }).toList(),
+          ),
+          const SizedBox(height: 16),
+
+          _buildTextField(
+            controller: _reporterNameController,
+            label: '신고자 이름',
+            isRequired: true,
+            validator: (value) {
+              if (value == null || value.isEmpty) {
+                return '신고자 이름을 입력해주세요';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 16),
+
+          _buildTextField(
+            controller: _reporterPhoneController,
+            label: '연락처',
+            isRequired: true,
+            keyboardType: TextInputType.phone,
+            validator: (value) {
+              if (value == null || value.isEmpty) {
+                return '연락처를 입력해주세요';
+              }
+              if (!RegExp(r'^[0-9-]+$').hasMatch(value)) {
+                return '올바른 전화번호 형식으로 입력해주세요';
+              }
+              return null;
+            },
+          ),
+          const SizedBox(height: 16),
+
+          _buildDropdownField(
+            label: '실종자와의 관계',
+            value: _selectedRelation,
+            items: _relationOptions,
             onChanged: (value) {
               setState(() {
                 _selectedRelation = value;
@@ -466,49 +349,6 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               }
               return null;
             },
-          ),
-          const SizedBox(height: 24),
-
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFEF3C7),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.3)),
-            ),
-            child: const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.warning_amber,
-                      color: Color(0xFFF59E0B),
-                      size: 20,
-                    ),
-                    SizedBox(width: 8),
-                    Text(
-                      '개인정보 수집 및 이용 안내',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFFF59E0B),
-                      ),
-                    ),
-                  ],
-                ),
-                SizedBox(height: 8),
-                Text(
-                  '입력하신 개인정보는 실종자 수색 목적으로만 사용되며, '
-                  '수색이 완료된 후 안전하게 삭제됩니다.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFFF59E0B),
-                    height: 1.4,
-                  ),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -582,8 +422,232 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 24),
+
+          _buildPrivacyPolicySection(),
         ],
       ),
+    );
+  }
+
+  Widget _buildSubmissionPage() {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          const Spacer(),
+          Icon(
+            _isSubmitting ? Icons.upload : Icons.check_circle_outline,
+            size: 80,
+            color: _isSubmitting ? const Color(0xFF1E40AF) : const Color(0xFF10B981),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            _isSubmitting ? '신고를 접수하는 중...' : '신고 준비 완료',
+            style: const TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1F2937),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _isSubmitting 
+                ? '잠시만 기다려주세요. 서버에 신고 내용을 전송하고 있습니다.'
+                : '모든 정보가 올바르게 입력되었습니다.\n아래 버튼을 눌러 신고를 접수해주세요.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 16,
+              color: Color(0xFF6B7280),
+              height: 1.5,
+            ),
+          ),
+          if (_isSubmitting) ...[
+            const SizedBox(height: 24),
+            const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1E40AF)),
+            ),
+          ],
+          const Spacer(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    bool isRequired = false,
+    String? hintText,
+    TextInputType? keyboardType,
+    List<TextInputFormatter>? inputFormatters,
+    int maxLines = 1,
+    String? Function(String?)? validator,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        RichText(
+          text: TextSpan(
+            text: label,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF374151),
+            ),
+            children: [
+              if (isRequired)
+                const TextSpan(
+                  text: ' *',
+                  style: TextStyle(color: Color(0xFFEF4444)),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: controller,
+          keyboardType: keyboardType,
+          inputFormatters: inputFormatters,
+          maxLines: maxLines,
+          validator: validator,
+          decoration: InputDecoration(
+            hintText: hintText,
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFF1E40AF), width: 2),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFFEF4444)),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDropdownField({
+    required String label,
+    required String? value,
+    required List<String> items,
+    required Function(String?) onChanged,
+    String? Function(String?)? validator,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        RichText(
+          text: TextSpan(
+            text: label,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF374151),
+            ),
+            children: const [
+              TextSpan(
+                text: ' *',
+                style: TextStyle(color: Color(0xFFEF4444)),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          value: value,
+          onChanged: onChanged,
+          validator: validator,
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: Colors.white,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFFD1D5DB)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFF1E40AF), width: 2),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          ),
+          items: items.map((String item) {
+            return DropdownMenuItem<String>(
+              value: item,
+              child: Text(item),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDateTimeField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '실종 일시 *',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF374151),
+          ),
+        ),
+        const SizedBox(height: 8),
+        InkWell(
+          onTap: _selectDateTime,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: const Color(0xFFD1D5DB)),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.calendar_today,
+                  color: _missingDateTime != null
+                      ? const Color(0xFF1E40AF)
+                      : const Color(0xFF9CA3AF),
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    _missingDateTime != null
+                        ? DateFormat('yyyy년 MM월 dd일 HH:mm').format(_missingDateTime!)
+                        : '실종 일시를 선택해주세요',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: _missingDateTime != null
+                          ? const Color(0xFF374151)
+                          : const Color(0xFF9CA3AF),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -597,22 +661,84 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
             width: 80,
             child: Text(
               label,
-              style: const TextStyle(
-                fontSize: 14,
-                color: Color(0xFF6B7280),
+              style: TextStyle(
+                color: Colors.grey[600],
                 fontWeight: FontWeight.w500,
               ),
             ),
           ),
-          const SizedBox(width: 8),
           Expanded(
             child: Text(
-              value.isNotEmpty ? value : '입력되지 않음',
-              style: TextStyle(
-                fontSize: 14,
-                color: value.isNotEmpty ? const Color(0xFF1F2937) : const Color(0xFF9CA3AF),
-              ),
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w500),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPrivacyPolicySection() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF3C7),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.warning_amber,
+                color: Color(0xFFF59E0B),
+                size: 20,
+              ),
+              SizedBox(width: 8),
+              Text(
+                '개인정보 수집 및 이용 안내',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFFF59E0B),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            '입력하신 개인정보는 실종자 수색 목적으로만 사용되며, '
+            '수색이 완료된 후 안전하게 삭제됩니다.',
+            style: TextStyle(
+              fontSize: 12,
+              color: Color(0xFFF59E0B),
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Checkbox(
+                value: _agreeToPoliciy,
+                onChanged: (value) {
+                  setState(() {
+                    _agreeToPoliciy = value ?? false;
+                  });
+                },
+                activeColor: const Color(0xFF1E40AF),
+              ),
+              const Expanded(
+                child: Text(
+                  '개인정보 수집 및 이용에 동의합니다',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF374151),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -625,37 +751,247 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
       decoration: const BoxDecoration(
         color: Colors.white,
         border: Border(
-          top: BorderSide(color: Color(0xFFE2E8F0)),
+          top: BorderSide(color: Color(0xFFE5E7EB)),
         ),
       ),
-      child: SafeArea(
-        child: Row(
-          children: [
-            if (_currentPage > 0)
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _previousPage,
-                  child: const Text('이전'),
-                ),
-              ),
-            if (_currentPage > 0) const SizedBox(width: 16),
+      child: Row(
+        children: [
+          if (_currentPage > 0)
             Expanded(
               child: ElevatedButton(
-                onPressed: _isSubmitting ? null : _nextPage,
-                child: _isSubmitting
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
-                      )
-                    : Text(_currentPage == 2 ? '신고 제출' : '다음'),
+                onPressed: _isSubmitting ? null : _previousPage,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF1E40AF),
+                  side: const BorderSide(color: Color(0xFF1E40AF)),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  '이전',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
               ),
+            ),
+          if (_currentPage > 0) const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: ElevatedButton(
+              onPressed: _isSubmitting ? null : _nextPage,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1E40AF),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text(
+                _getNextButtonText(),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getNextButtonText() {
+    if (_isSubmitting) return '처리 중...';
+    if (_currentPage == _totalPages - 1) return '신고 접수';
+    return '다음';
+  }
+
+  void _onPhotoSelected(XFile? photo) {
+    setState(() {
+      _selectedPhoto = photo;
+    });
+  }
+
+  Future<void> _selectDateTime() async {
+    final DateTime? date = await showDatePicker(
+      context: context,
+      initialDate: _missingDateTime ?? DateTime.now(),
+      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      lastDate: DateTime.now(),
+    );
+
+    if (date != null && mounted) {
+      final TimeOfDay? time = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(_missingDateTime ?? DateTime.now()),
+      );
+
+      if (time != null) {
+        setState(() {
+          _missingDateTime = DateTime(
+            date.year,
+            date.month,
+            date.day,
+            time.hour,
+            time.minute,
+          );
+        });
+      }
+    }
+  }
+
+  void _previousPage() {
+    if (_currentPage > 0) {
+      _pageController.previousPage(
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  void _nextPage() {
+    if (_currentPage < _totalPages - 1) {
+      if (_validateCurrentPage()) {
+        _pageController.nextPage(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      }
+    } else {
+      _submitReport();
+    }
+  }
+
+  bool _validateCurrentPage() {
+    switch (_currentPage) {
+      case 0:
+        return _nameController.text.isNotEmpty &&
+               _ageController.text.isNotEmpty &&
+               _selectedGender != null &&
+               _missingLocationController.text.isNotEmpty;
+      case 1:
+        return _missingDateTime != null &&
+               _reporterNameController.text.isNotEmpty &&
+               _reporterPhoneController.text.isNotEmpty &&
+               _selectedRelation != null;
+      case 2:
+        return _agreeToPoliciy;
+      default:
+        return true;
+    }
+  }
+
+  Future<void> _submitReport() async {
+    if (!_validateCurrentPage() || _isSubmitting) return;
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      final result = await ApiService.submitMissingPerson(
+        name: _nameController.text,
+        age: int.parse(_ageController.text),
+        gender: _selectedGender!,
+        missingLocation: _missingLocationController.text,
+        missingDateTime: _missingDateTime!,
+        reporterName: _reporterNameController.text,
+        reporterPhone: _reporterPhoneController.text,
+        reporterRelation: _selectedRelation!,
+        description: _descriptionController.text.isEmpty ? null : _descriptionController.text,
+        photo: _selectedPhoto,
+      );
+
+      if (mounted) {
+        if (result['success']) {
+          _showSuccessDialog(result['person_id']);
+        } else {
+          _showErrorDialog(result['message']);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        _showErrorDialog('신고 접수 중 오류가 발생했습니다.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  void _showSuccessDialog(String personId) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        icon: const Icon(
+          Icons.check_circle,
+          color: Color(0xFF10B981),
+          size: 48,
+        ),
+        title: const Text('신고 접수 완료'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '실종자 신고가 성공적으로 접수되었습니다.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '신고번호: ${personId.substring(0, 8)}',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF1E40AF),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              '관리자가 검토 후 수색 활동을 시작합니다.',
+              style: TextStyle(
+                fontSize: 14,
+                color: Color(0xFF6B7280),
+              ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
+        actions: [
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).pop();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E40AF),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showErrorDialog(String message) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(
+          Icons.error_outline,
+          color: Color(0xFFEF4444),
+          size: 48,
+        ),
+        title: const Text('신고 접수 실패'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('확인'),
+          ),
+        ],
       ),
     );
   }

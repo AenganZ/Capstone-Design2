@@ -1,9 +1,0 @@
-fastapi
-uvicorn
-httpx
-python-multipart
-pillow
-python-dotenv
-pydantic
-firebase-admin
-websockets
