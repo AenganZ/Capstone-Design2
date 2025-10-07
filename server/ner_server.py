@@ -383,6 +383,7 @@ def process_base64_image(base64_string: str) -> str:
         return None
 
 def process_missing_person(raw_data: dict, ner_model: KPFBertNER) -> ProcessedPerson:
+    # etcSpfeatr을 주요 설명으로 사용
     description = raw_data.get("etcSpfeatr", "") or ""
     photo_base64 = raw_data.get("tknphotoFile", "") or ""
     
@@ -399,9 +400,26 @@ def process_missing_person(raw_data: dict, ner_model: KPFBertNER) -> ProcessedPe
     
     gender = raw_data.get("sexdstnDscd", "")
     
-    # description이 비어있어도 기본 정보로 처리
-    ner_entities = ner_model.extract_entities(description) if description else {}
-    extracted_features = ner_model.extract_detailed_features(description) if description else {}
+    # etcSpfeatr이 있으면 NER 처리
+    ner_entities = {}
+    extracted_features = {}
+    
+    if description and description.strip():
+        print(f"etcSpfeatr 처리 중: {description[:100]}...")
+        ner_entities = ner_model.extract_entities(description)
+        extracted_features = ner_model.extract_detailed_features(description)
+        
+        # etcSpfeatr 원본을 extracted_features에 추가
+        if "추가정보" not in extracted_features:
+            extracted_features["추가정보"] = []
+        
+        # 줄바꿈으로 분리하여 리스트로 저장
+        etcSpfeatr_lines = [line.strip() for line in description.split('\n') if line.strip()]
+        extracted_features["추가정보"].extend(etcSpfeatr_lines)
+    else:
+        ner_entities = {}
+        extracted_features = {}
+    
     risk_factors = ner_model.extract_risk_factors(description, age, gender)
     
     # 우선순위 결정
@@ -414,7 +432,8 @@ def process_missing_person(raw_data: dict, ner_model: KPFBertNER) -> ProcessedPe
             priority = "HIGH"
     
     # description이 있고 위험 키워드가 있으면 HIGH
-    if description and any(keyword in description.lower() for keyword in ["치매", "알츠하이머", "기억", "인지", "배회", "정신", "우울증"]):
+    if description and any(keyword in description.lower() for keyword in 
+                          ["치매", "알츠하이머", "기억", "인지", "배회", "정신", "우울증", "약 복용"]):
         priority = "HIGH"
     
     # 위험 요소 기반 우선순위
@@ -457,13 +476,16 @@ def process_missing_person(raw_data: dict, ner_model: KPFBertNER) -> ProcessedPe
             print(f"사진 처리 오류: {e}")
             photo_url = None
     
+    # 최종 description 생성 (화면 표시용)
+    final_description = description if description else f"{age}세 {gender}"
+    
     return ProcessedPerson(
         id=str(raw_data.get("msspsnIdntfccd", f"temp_{int(time.time())}")),
         name=name,
         age=age,
         gender=gender,
         location=raw_data.get("occrAdres"),
-        description=description if description else f"{age}세 {gender}",
+        description=final_description,
         photo_url=photo_url,
         photo_base64=photo_base64,
         priority=priority,

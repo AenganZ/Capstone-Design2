@@ -104,17 +104,36 @@
             border-bottom: 1px solid #e2e8f0;
             background: white;
         }
+
+        /* 가로 스크롤바 스타일링 (Chrome, Safari) */
+        .tab-container::-webkit-scrollbar {
+            height: 4px;
+        }
+
+        .tab-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .tab-container::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+
+        .tab-container::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
         
         .tab-button {
             flex: 1;
-            padding: 12px 8px;
+            padding: 12px 10px;
             background: none;
             border: none;
             cursor: pointer;
-            font-size: 0.875rem;
+            font-size: 0.8rem;
             font-weight: 500;
             color: #64748b;
             transition: all 0.2s;
+            white-space: nowrap; 
         }
         
         .tab-button.active {
@@ -498,6 +517,11 @@
             transition: all 0.2s ease;
         }
         
+        .btn:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
         .btn-primary {
             background: #3b82f6;
             color: white;
@@ -805,6 +829,88 @@
                 display: none;
             }
         }
+        .person-card {
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .person-badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            background: #f3f4f6;
+            color: #374151;
+            font-size: 0.875rem;
+            display: inline-block;
+        }
+
+        .category-badge {
+            background: #dbeafe;
+            color: #1e40af;
+            font-weight: 600;
+        }
+
+        .stats-row {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .stat-card {
+            flex: 1;
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            text-align: center;
+        }
+
+        .detail-section {
+            margin-bottom: 1.5rem;
+        }
+
+        .detail-section h4 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #e5e7eb;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .detail-label {
+            font-weight: 500;
+            color: #6b7280;
+        }
+
+        .detail-value {
+            font-weight: 500;
+            color: #1f2937;
+        }
+
+        .risk-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .risk-tag {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 0.25rem 0.75rem;
+            border-radius: 16px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
@@ -842,8 +948,8 @@
                 <button class="tab-button" onclick="switchTab('drivers')">기사관리</button>
                 <button class="tab-button" onclick="switchTab('cctv')">CCTV</button>
                 <button class="tab-button" onclick="switchTab('alert')">알림</button>
+                <button class="tab-button" onclick="switchTab('reports')">실종자 신고</button>
             </div>
-            
             <div id="missing-tab" class="tab-content active">
                 <div class="sidebar-section">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
@@ -852,6 +958,14 @@
                             <button class="test-btn" style="padding: 4px 8px; font-size: 0.7rem;" onclick="admin.toggleAllPersons(true)">전체 표시</button>
                             <button class="test-btn" style="padding: 4px 8px; font-size: 0.7rem;" onclick="admin.toggleAllPersons(false)">전체 숨김</button>
                         </div>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <input type="text" 
+                            class="form-input" 
+                            id="missingPersonSearch" 
+                            placeholder="이름으로 검색..." 
+                            onkeyup="searchMissingPersons()"
+                            style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 6px;">
                     </div>
                     <div class="person-list" id="personList">
                         <div class="loading">
@@ -985,6 +1099,41 @@
                     <div id="notificationResult"></div>
                 </div>
             </div>
+            <div id="reports-tab" class="tab-content">
+                <div class="sidebar-section">
+                    <h2 class="section-title">대기 중인 신고 목록</h2>
+                    <div class="stats-row" style="margin-bottom: 1rem;">
+                        <div class="stat-card">
+                            <div class="stat-value" id="pendingReportsCount">0</div>
+                            <div class="stat-label">대기 중</div>
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary" onclick="loadPendingReports()" style="margin-bottom: 1rem;">
+                        목록 새로고침
+                    </button>
+                    
+                    <div class="person-list" id="pendingReportsList">
+                        <div style="text-align: center; padding: 2rem; color: #9ca3af;">
+                            대기 중인 신고를 불러오는 중...
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="sidebar-section">
+                    <h2 class="section-title">승인된 실종자 관리</h2>
+                    <div class="form-group">
+                        <label class="form-label">실종자 검색</label>
+                        <input type="text" class="form-input" id="approvedPersonSearch" 
+                               placeholder="이름으로 검색..." onkeyup="searchApprovedPersons()">
+                    </div>
+                    
+                    <div class="person-list" id="approvedPersonsList" style="max-height: 400px; overflow-y: auto;">
+                        <div style="text-align: center; padding: 2rem; color: #9ca3af;">
+                            승인된 실종자 목록
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <div class="content-area">
@@ -1079,6 +1228,12 @@
             
             document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
             document.getElementById(`${tabName}-tab`).classList.add('active');
+            
+            // 실종자 신고 탭 클릭 시 데이터 로드
+            if (tabName === 'reports') {
+                loadPendingReports();
+                loadApprovedPersons();
+            }
         }
         
         function registerDriver() {
@@ -1155,10 +1310,38 @@
         }
 
         function closePersonDetail() {
-            document.getElementById('personDetailModal').style.display = 'none';
+            const modal = document.getElementById('personDetailModal');
+            modal.style.display = 'none';
         }
 
+        // 모달 외부 클릭 시 닫기
+        document.addEventListener('DOMContentLoaded', function() {
+            // 실종자 신고 탭 버튼에 이벤트 리스너 추가
+            const reportsTabButton = document.querySelector('[onclick="switchTab(\'reports\')"]');
+            if (reportsTabButton) {
+                reportsTabButton.addEventListener('click', function() {
+                    console.log('실종자 신고 탭 클릭됨');
+                    setTimeout(() => {
+                        loadPendingReports();
+                        loadApprovedPersons();
+                    }, 100);
+                });
+            }
+            
+            // 모달 외부 클릭 시 닫기
+            const modal = document.getElementById('personDetailModal');
+            if (modal) {
+                modal.addEventListener('click', function(e) {
+                    if (e.target === modal) {
+                        closePersonDetail();
+                    }
+                });
+            }
+        });
+
         async function showPersonDetail(personId) {
+            console.log('상세 정보 표시:', personId);  // 디버깅용
+            
             try {
                 const response = await fetch(`${API_BASE_URL}/api/person/${personId}`);
                 const person = await response.json();
@@ -1171,78 +1354,75 @@
                 const modal = document.getElementById('personDetailModal');
                 const content = document.getElementById('personDetailContent');
                 
+                // HTML 생성 (기존 코드 그대로 사용)
                 content.innerHTML = `
                     <div style="display: flex; gap: 2rem; margin-bottom: 2rem;">
                         <div>
-                            ${person.photo_url ? 
-                                `<img src="${person.photo_url}" alt="${person.name || '실종자'}" class="person-photo" style="max-width: 150px; max-height: 150px; object-fit: cover;">` :
-                                '<div class="person-photo placeholder">사진</div>'
+                            ${person.photo_url || person.photo_base64 ? 
+                                `<img src="${person.photo_url || person.photo_base64}" 
+                                    style="width: 150px; height: 150px; border-radius: 8px; object-fit: cover;">` :
+                                `<div style="width: 150px; height: 150px; background: #f3f4f6; border-radius: 8px; 
+                                            display: flex; align-items: center; justify-content: center;">
+                                    <span style="font-size: 3rem;">👤</span>
+                                </div>`
                             }
                         </div>
                         <div style="flex: 1;">
-                            <h2 style="color: #1f2937; margin-bottom: 1rem;">${person.name || '이름 미상'}</h2>
-                            <div class="detail-grid">
-                                <div class="detail-item">
-                                    <div class="detail-label">나이</div>
-                                    <div class="detail-value">${person.age || '미상'}세</div>
-                                </div>
-                                <div class="detail-item">
-                                    <div class="detail-label">성별</div>
-                                    <div class="detail-value">${person.gender || '미상'}</div>
-                                </div>
-                                <div class="detail-item">
-                                    <div class="detail-label">분류</div>
-                                    <div class="detail-value">${person.category || '기타'}</div>
-                                </div>
-                                <div class="detail-item">
-                                    <div class="detail-label">우선순위</div>
-                                    <div class="detail-value" style="color: ${person.priority === 'HIGH' ? '#ef4444' : '#f59e0b'}">${person.priority}</div>
-                                </div>
+                            <h2 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 1rem;">
+                                ${person.name || '이름 미상'}
+                            </h2>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                                <div><strong>나이:</strong> ${person.age || '미상'}세</div>
+                                <div><strong>성별:</strong> ${person.gender || '미상'}</div>
+                                <div><strong>분류:</strong> ${person.category || '기타'}</div>
+                                <div><strong>우선순위:</strong> <span style="color: ${person.priority === 'HIGH' ? '#ef4444' : '#f59e0b'}">${person.priority}</span></div>
                             </div>
                         </div>
                     </div>
                     
-                    <div class="detail-section">
-                        <h4>실종 장소</h4>
-                        <div class="detail-item">
-                            <div class="detail-value">${person.location || '위치 미상'}</div>
-                        </div>
+                    <div style="margin-bottom: 1rem;">
+                        <h4 style="font-weight: 600; margin-bottom: 0.5rem;">실종 장소</h4>
+                        <p>${person.location || '정보 없음'}</p>
                     </div>
                     
                     ${person.description ? `
-                    <div class="detail-section">
-                        <h4>상세 설명</h4>
-                        <div class="detail-item">
-                            <div class="detail-value">${person.description}</div>
-                        </div>
+                    <div style="margin-bottom: 1rem;">
+                        <h4 style="font-weight: 600; margin-bottom: 0.5rem;">상세 설명</h4>
+                        <p style="white-space: pre-line;">${person.description}</p>
                     </div>
                     ` : ''}
                     
-                    ${person.ner_entities && Object.keys(person.ner_entities).length > 0 ? `
-                    <div class="detail-section">
-                        <h4>추출된 특징</h4>
-                        <div class="feature-tags">
-                            ${Object.entries(person.ner_entities).map(([key, values]) => 
-                                values.map(value => `<span class="feature-tag">${value}</span>`).join('')
+                    ${person.extracted_features && person.extracted_features['추가정보'] ? `
+                    <div style="background: #f0f9ff; padding: 1rem; border-radius: 8px; border: 2px solid #3b82f6; margin-bottom: 1rem;">
+                        <h4 style="color: #1e40af; font-weight: 600; margin-bottom: 0.5rem;">📋 상세 추가 정보</h4>
+                        <ul style="margin: 0; padding-left: 1.5rem;">
+                            ${person.extracted_features['추가정보'].map(info => 
+                                `<li style="margin-bottom: 0.5rem;">${info}</li>`
                             ).join('')}
-                        </div>
+                        </ul>
                     </div>
                     ` : ''}
                     
                     ${person.risk_factors && person.risk_factors.length > 0 ? `
-                    <div class="detail-section">
-                        <h4>위험 요소</h4>
-                        <div class="risk-tags">
-                            ${person.risk_factors.map(factor => `<span class="risk-tag">${factor}</span>`).join('')}
+                    <div style="margin-bottom: 1rem;">
+                        <h4 style="font-weight: 600; margin-bottom: 0.5rem;">위험 요소</h4>
+                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                            ${person.risk_factors.map(factor => 
+                                `<span style="background: #fee2e2; color: #991b1b; padding: 0.25rem 0.75rem; 
+                                            border-radius: 16px; font-size: 0.75rem;">${factor}</span>`
+                            ).join('')}
                         </div>
                     </div>
                     ` : ''}
                 `;
                 
+                // 모달 표시
                 modal.style.display = 'flex';
+                console.log('모달 표시됨');  // 디버깅용
                 
             } catch (error) {
-                admin.showToast('실종자 정보를 불러오는 중 오류가 발생했습니다.', 'error');
+                console.error('상세 정보 로드 오류:', error);
+                admin.showToast('실종자 정보를 불러오는 중 오류가 발생했습니다', 'error');
             }
         }
 
@@ -2056,6 +2236,25 @@
                     case 'manual_notification_sent':
                         this.handleManualNotification(message.data);
                         break;
+                            case 'new_report_pending':
+                        this.showToast('새로운 실종자 신고가 접수되었습니다', 'info');
+                        if (document.getElementById('reports-tab').classList.contains('active')) {
+                            loadPendingReports();
+                        }
+                        break;
+                    
+                    case 'person_approved':
+                        this.showToast('실종자 신고가 승인되었습니다', 'success');
+                        if (document.getElementById('reports-tab').classList.contains('active')) {
+                            loadApprovedPersons();
+                        }
+                        this.loadInitialData();
+                        break;
+                    
+                    case 'person_deleted':
+                        this.showToast('실종자가 삭제되었습니다', 'info');
+                        this.loadInitialData();
+                        break;
                 }
             }
             
@@ -2161,20 +2360,19 @@
                     
                     return `
                         <div class="person-item ${priorityClass} ${newClass} ${selectedClass}" 
-                             onclick="admin.selectPerson('${person.id}')" 
-                             ondblclick="showPersonDetail('${person.id}')"
-                             data-person-id="${person.id}">
+                            onclick="admin.selectPerson('${person.id}')" 
+                            data-person-id="${person.id}">
                             <div style="display: flex; align-items: center; gap: 0.5rem; margin-right: 0.5rem;">
                                 <input type="checkbox" 
-                                       ${this.personVisibility[person.id] ? 'checked' : ''} 
-                                       onchange="admin.togglePersonVisibility('${person.id}', this.checked)"
-                                       onclick="event.stopPropagation()"
-                                       style="margin: 0;">
+                                    ${this.personVisibility[person.id] ? 'checked' : ''} 
+                                    onchange="admin.togglePersonVisibility('${person.id}', this.checked)"
+                                    onclick="event.stopPropagation()"
+                                    style="margin: 0;">
                                 <div class="person-marker ${(person.priority || 'medium').toLowerCase()}">
                                     !
                                 </div>
                             </div>
-                            <div class="person-info">
+                            <div class="person-info" ondblclick="event.stopPropagation(); showPersonDetail('${person.id}');">
                                 <div class="person-name">
                                     ${person.name || '이름 미상'} (${person.age || '나이 미상'}세)
                                 </div>
@@ -2202,8 +2400,19 @@
 
             async selectPerson(personId) {
                 this.selectedPerson = personId;
+                
+                // 현재 검색어 저장
+                const searchInput = document.getElementById('missingPersonSearch');
+                const currentSearch = searchInput ? searchInput.value : '';
+                
                 this.renderPersonList();
                 this.updatePersonSelect();
+                
+                // 검색 필터 다시 적용
+                if (currentSearch) {
+                    searchInput.value = currentSearch;
+                    searchMissingPersons();  // 검색 필터 재적용
+                }
                 
                 const person = this.persons.find(p => p.id === personId);
                 if (person) {
@@ -2590,6 +2799,323 @@
         window.onload = () => {
             admin = new AdminDashboard();
         };
+
+        // 대기 중인 신고 목록 로드
+        async function loadPendingReports() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/pending_reports`);
+                const data = await response.json();
+                
+                document.getElementById('pendingReportsCount').textContent = data.count || 0;
+                
+                const container = document.getElementById('pendingReportsList');
+                
+                if (!data.reports || data.reports.length === 0) {
+                    container.innerHTML = '<div style="text-align: center; padding: 2rem; color: #9ca3af;">대기 중인 신고가 없습니다.</div>';
+                    return;
+                }
+                
+                const html = data.reports.map(report => `
+                    <div class="person-card" style="border-left: 4px solid #f59e0b;">
+                        <div style="display: flex; gap: 1rem;">
+                            ${report.photo_base64 ? `
+                                <img src="${report.photo_base64}" 
+                                     style="width: 80px; height: 80px; border-radius: 8px; object-fit: cover;">
+                            ` : `
+                                <div style="width: 80px; height: 80px; background: #f3f4f6; border-radius: 8px; 
+                                            display: flex; align-items: center; justify-content: center;">
+                                    <span style="font-size: 2rem;">👤</span>
+                                </div>
+                            `}
+                            
+                            <div style="flex: 1;">
+                                <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">
+                                    ${report.name || '이름 미상'}
+                                </h3>
+                                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                                    <span class="person-badge">${report.age || '?'}세</span>
+                                    <span class="person-badge">${report.gender || '?'}</span>
+                                    <span class="person-badge category-badge">${report.category || '기타'}</span>
+                                </div>
+                                <p style="font-size: 0.9rem; color: #6b7280; margin-bottom: 0.5rem;">
+                                    <strong>실종 장소:</strong> ${report.location || '정보 없음'}
+                                </p>
+                                <p style="font-size: 0.9rem; color: #6b7280; margin-bottom: 0.5rem;">
+                                    <strong>실종 시각:</strong> ${formatDateTime(report.last_seen)}
+                                </p>
+                                <p style="font-size: 0.9rem; color: #6b7280; margin-bottom: 0.5rem;">
+                                    <strong>신고 접수:</strong> ${formatDateTime(report.created_at)}
+                                </p>
+                                ${report.emergency_contact ? `
+                                    <p style="font-size: 0.9rem; color: #6b7280; margin-bottom: 0.5rem;">
+                                        <strong>연락처:</strong> ${report.emergency_contact}
+                                    </p>
+                                ` : ''}
+                                ${report.description ? `
+                                    <p style="font-size: 0.9rem; color: #6b7280; margin-top: 0.5rem;">
+                                        ${report.description}
+                                    </p>
+                                ` : ''}
+                            </div>
+                        </div>
+                        
+                        <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                            <button class="btn btn-primary" onclick="approveReport('${report.id}')" style="flex: 1;">
+                                승인
+                            </button>
+                            <button class="btn" onclick="rejectReport('${report.id}')" 
+                                    style="flex: 1; background: #ef4444; color: white;">
+                                거절
+                            </button>
+                            <button class="btn btn-secondary" onclick="showReportDetail('${report.id}')">
+                                상세
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+                
+                container.innerHTML = html;
+                
+            } catch (error) {
+                console.error('대기 신고 로드 실패:', error);
+                admin.showToast('신고 목록을 불러올 수 없습니다', 'error');
+            }
+        }
+
+        // 신고 승인
+        async function approveReport(reportId) {
+            if (!confirm('이 실종자 신고를 승인하시겠습니까?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/missing_persons/${reportId}/approve`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                
+                if (response.ok) {
+                    admin.showToast('신고가 승인되었습니다', 'success');
+                    admin.addActivity({
+                        time: new Date().toLocaleTimeString(),
+                        content: `실종자 신고 승인`
+                    });
+                    await loadPendingReports();
+                    await loadApprovedPersons();
+                } else {
+                    admin.showToast('승인에 실패했습니다', 'error');
+                }
+            } catch (error) {
+                console.error('승인 오류:', error);
+                admin.showToast('승인 중 오류가 발생했습니다', 'error');
+            }
+        }
+
+        // 신고 거절
+        async function rejectReport(reportId) {
+            const reason = prompt('거절 사유를 입력해주세요:');
+            if (!reason) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/missing_persons/${reportId}/reject`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(reason)
+                });
+                
+                if (response.ok) {
+                    admin.showToast('신고가 거절되었습니다', 'success');
+                    admin.addActivity({
+                        time: new Date().toLocaleTimeString(),
+                        content: `실종자 신고 거절`
+                    });
+                    await loadPendingReports();
+                } else {
+                    admin.showToast('거절에 실패했습니다', 'error');
+                }
+            } catch (error) {
+                console.error('거절 오류:', error);
+                admin.showToast('거절 중 오류가 발생했습니다', 'error');
+            }
+        }
+
+        // 승인된 실종자 목록 로드
+        async function loadApprovedPersons() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/missing_persons`);
+                const data = await response.json();
+                
+                const container = document.getElementById('approvedPersonsList');
+                
+                if (!container) {
+                    console.error('approvedPersonsList 요소를 찾을 수 없습니다');
+                    return;
+                }
+                
+                if (!data.persons || data.persons.length === 0) {
+                    container.innerHTML = '<div style="text-align: center; padding: 2rem; color: #9ca3af;">승인된 실종자가 없습니다.</div>';
+                    return;
+                }
+                
+                const html = data.persons.map(person => `
+                    <div class="person-card" style="border-left: 4px solid #10b981; margin-bottom: 0.75rem;">
+                        <div style="display: flex; gap: 1rem; align-items: start;">
+                            ${person.photo_url || person.photo_base64 ? `
+                                <img src="${person.photo_url || person.photo_base64}" 
+                                    style="width: 60px; height: 60px; border-radius: 8px; object-fit: cover;">
+                            ` : `
+                                <div style="width: 60px; height: 60px; background: #f3f4f6; border-radius: 8px; 
+                                            display: flex; align-items: center; justify-content: center;">
+                                    <span style="font-size: 1.5rem;">👤</span>
+                                </div>
+                            `}
+                            
+                            <div style="flex: 1;">
+                                <h4 style="font-size: 1rem; font-weight: 600; margin-bottom: 0.3rem;">
+                                    ${person.name || '이름 미상'}
+                                </h4>
+                                <div style="display: flex; gap: 0.3rem; margin-bottom: 0.3rem; flex-wrap: wrap;">
+                                    <span class="person-badge" style="font-size: 0.75rem;">${person.age || '?'}세</span>
+                                    <span class="person-badge" style="font-size: 0.75rem;">${person.gender || '?'}</span>
+                                    <span class="person-badge category-badge" style="font-size: 0.75rem;">${person.category || '기타'}</span>
+                                    ${person.source === 'REPORTER' ? 
+                                        '<span class="person-badge" style="font-size: 0.75rem; background: #3b82f6; color: white;">신고</span>' : 
+                                        '<span class="person-badge" style="font-size: 0.75rem; background: #8b5cf6; color: white;">API</span>'}
+                                </div>
+                                <p style="font-size: 0.85rem; color: #6b7280;">
+                                    ${person.location || '위치 정보 없음'}
+                                </p>
+                            </div>
+                            
+                            <button class="btn" onclick="event.stopPropagation(); deletePerson('${person.id}')" 
+                                    style="background: #ef4444; color: white; padding: 0.5rem 1rem; font-size: 0.875rem; 
+                                        border: none; border-radius: 6px; cursor: pointer; white-space: nowrap;">
+                                삭제
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+                
+                container.innerHTML = html;
+                
+                console.log(`승인된 실종자 ${data.persons.length}명 표시됨`);
+                
+            } catch (error) {
+                console.error('승인된 실종자 로드 실패:', error);
+                const container = document.getElementById('approvedPersonsList');
+                if (container) {
+                    container.innerHTML = '<div style="text-align: center; padding: 2rem; color: #ef4444;">실종자 목록을 불러올 수 없습니다.</div>';
+                }
+            }
+        }
+
+        // 실종자 삭제
+        async function deletePerson(personId) {
+            if (!confirm('이 실종자를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/missing_persons/${personId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    admin.showToast('실종자가 삭제되었습니다', 'success');
+                    admin.addActivity({
+                        time: new Date().toLocaleTimeString(),
+                        content: `실종자 삭제`
+                    });
+                    
+                    // 목록 새로고침
+                    await loadApprovedPersons();
+                    await admin.loadInitialData();
+                } else {
+                    const error = await response.json();
+                    admin.showToast(`삭제 실패: ${error.detail || '알 수 없는 오류'}`, 'error');
+                }
+            } catch (error) {
+                console.error('삭제 오류:', error);
+                admin.showToast('삭제 중 오류가 발생했습니다', 'error');
+            }
+        }
+
+        // 실종자 검색
+        function searchApprovedPersons() {
+            const searchTerm = document.getElementById('approvedPersonSearch').value.toLowerCase();
+            const cards = document.querySelectorAll('#approvedPersonsList .person-card');
+            
+            cards.forEach(card => {
+                const name = card.querySelector('h4').textContent.toLowerCase();
+                if (name.includes(searchTerm)) {
+                    card.style.display = 'block';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        }
+
+        // 날짜 포맷 함수
+        function formatDateTime(dateString) {
+            if (!dateString) return '정보 없음';
+            try {
+                const date = new Date(dateString);
+                return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+            } catch {
+                return dateString;
+            }
+        }
+
+        // 신고 상세 보기
+        async function showReportDetail(reportId) {
+            showPersonDetail(reportId);
+        }
+
+        // 실종자 검색 함수
+        function searchMissingPersons() {
+            const searchTerm = document.getElementById('missingPersonSearch').value.toLowerCase();
+            const personCards = document.querySelectorAll('#personList .person-item');
+            
+            let visibleCount = 0;
+            
+            personCards.forEach(card => {
+                // .person-name 클래스를 가진 요소에서 이름 추출
+                const nameElement = card.querySelector('.person-name');
+                
+                if (nameElement) {
+                    const nameText = nameElement.textContent.toLowerCase();
+                    
+                    // 검색어가 이름에 포함되어 있으면 표시
+                    if (nameText.includes(searchTerm)) {
+                        card.style.display = 'flex';  // person-item은 flex 레이아웃 사용
+                        visibleCount++;
+                    } else {
+                        card.style.display = 'none';
+                    }
+                }
+            });
+            
+            // 검색 결과가 없을 때 메시지 표시 (선택사항)
+            const container = document.getElementById('personList');
+            let noResultsMsg = container.querySelector('.no-results-message');
+            
+            if (visibleCount === 0 && searchTerm.length > 0) {
+                if (!noResultsMsg) {
+                    noResultsMsg = document.createElement('div');
+                    noResultsMsg.className = 'no-results-message';
+                    noResultsMsg.style.cssText = 'text-align: center; padding: 2rem; color: #9ca3af;';
+                    noResultsMsg.textContent = '검색 결과가 없습니다.';
+                    container.appendChild(noResultsMsg);
+                }
+                noResultsMsg.style.display = 'block';
+            } else if (noResultsMsg) {
+                noResultsMsg.style.display = 'none';
+            }
+            
+            console.log(`검색 결과: "${searchTerm}" - ${visibleCount}명 표시`);
+        }
     </script>
 </body>
 </html>

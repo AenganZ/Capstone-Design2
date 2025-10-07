@@ -362,7 +362,8 @@ async def init_database():
         ('last_seen', 'TEXT'),
         ('clothing_description', 'TEXT'),
         ('medical_condition', 'TEXT'),
-        ('emergency_contact', 'TEXT')
+        ('emergency_contact', 'TEXT'),
+        ('approval_status', 'TEXT DEFAULT "APPROVED"')
     ]
     
     for column_name, column_type in new_columns:
@@ -564,7 +565,7 @@ def get_missing_persons(status: str = "ACTIVE", limit: int = None, offset: int =
                created_at, updated_at, status, category, source, confidence_score,
                last_seen, clothing_description, medical_condition, emergency_contact
         FROM missing_persons 
-        WHERE status = ?
+        WHERE status = ? AND (approval_status = 'APPROVED' OR source != 'REPORTER')
         ORDER BY priority DESC, created_at DESC
     '''
     
@@ -608,12 +609,10 @@ def get_existing_person_ids() -> set:
 
 async def fetch_safe182_data():
     try:
-        params = {}
+        params = {"rowSize": 100, "page": 1}
         if SAFE182_ESNTL_ID and SAFE182_AUTH_KEY:
-            params = {
-                "esntlId": SAFE182_ESNTL_ID,
-                "authKey": SAFE182_AUTH_KEY
-            }
+            params["esntlId"] = SAFE182_ESNTL_ID
+            params["authKey"] = SAFE182_AUTH_KEY
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             start_time = time.time()
@@ -627,13 +626,29 @@ async def fetch_safe182_data():
             
             data = response.json()
             
-            if not isinstance(data, list):
+            # 응답 형식 확인 및 처리
+            if isinstance(data, dict):
+                # {"persons": [...]} 형식인 경우
+                if "persons" in data:
+                    persons_list = data["persons"]
+                # {"data": [...]} 형식인 경우
+                elif "data" in data:
+                    persons_list = data["data"]
+                # {"list": [...]} 형식인 경우
+                elif "list" in data:
+                    persons_list = data["list"]
+                else:
+                    log_system_event("WARNING", "SAFE182_API", f"알 수 없는 응답 형식: {list(data.keys())}")
+                    return []
+            elif isinstance(data, list):
+                persons_list = data
+            else:
                 log_system_event("WARNING", "SAFE182_API", "응답이 예상 형식이 아닙니다")
                 return []
             
-            await log_api_request("SAFE182", "GET", len(data), True, response_time)
-            print(f"Safe182에서 {len(data)}명의 실종자 데이터를 가져왔습니다")
-            return data
+            await log_api_request("SAFE182", "GET", len(persons_list), True, response_time)
+            print(f"Safe182에서 {len(persons_list)}명의 실종자 데이터를 가져왔습니다")
+            return persons_list
             
     except Exception as e:
         api_manager.record_error()
@@ -666,16 +681,109 @@ async def send_to_ner_server(raw_data_list: List[Dict]) -> List[Dict]:
         log_system_event("ERROR", "NER_SERVER", f"연결 실패: {e}")
         return []
 
+def preprocess_address(address: str) -> str:
+    """
+    주소를 전처리하여 지오코딩 성공률을 높임
+    
+    중요 규칙:
+    1. 도로명 주소의 번호는 절대 건드리지 않음 (비슬로116길, 지족로148번길)
+    2. 도로명 주소("~로", "~길")는 건드리지 않음 (읍성로, 동문로79번길)
+    3. 행정구역("~동", "~읍", "~면", "~리")은 보존
+    """
+    if not address:
+        return address
+    
+    import re
+    
+    original = address.strip()
+    address = original
+    
+    # 1. 특수문자 제거 (@, /, \)
+    address = re.sub(r'[@/\\]', ' ', address)
+    address = re.sub(r'\s+', ' ', address).strip()
+    
+    # 2. 건물명만 제거 (공백 뒤에 오는 건물명)
+    building_patterns = [
+        r'\s+[가-힣0-9]+아파트\b',
+        r'\s+[가-힣0-9]+빌라\b',
+        r'\s+[가-힣0-9]+타운\b',
+        r'\s+[가-힣0-9]+맨션\b',
+        r'\s+[가-힣0-9]+주택\b',
+        r'\s+[가-힣0-9]+연립\b',
+        r'\s+[가-힣0-9]+오피스텔\b',
+    ]
+    
+    for pattern in building_patterns:
+        address = re.sub(pattern, '', address)
+    
+    address = re.sub(r'\s+', ' ', address).strip()
+    
+    # 3. 끝의 번지수만 제거 (예: "123-456" 또는 "123")
+    # 단, 도로명 뒤의 번호는 제거하지 않음
+    if not re.search(r'[로길]', address):  # 도로명이 없는 경우만
+        address = re.sub(r'\s+\d+-\d+\s*$', '', address)
+        address = re.sub(r'\s+\d+\s*$', '', address)
+    
+    address = address.strip()
+    
+    # 4. 패턴 매칭: 행정구역 추출
+    # 주의: 도로명("~로", "~길")과 행정구역("~동", "~읍", "~면", "~리")을 구분!
+    
+    # 먼저 도로명 주소인지 확인
+    has_road_name = bool(re.search(r'[로길]\s*\d*[번]?[길]?\s*$', address))
+    
+    if not has_road_name:
+        # 도로명이 없으면 행정구역만 추출
+        city_patterns = [
+            # 시/도 + 구/군 + 동/읍/면/리
+            r'(.*?(?:특별시|광역시|도))\s+(.*?(?:시|군|구))\s+(.*?(?:동|읍|면|리))\s*',
+            # 시 + 구 + 동
+            r'(.*?시)\s+(.*?구)\s+(.*?동)\s*',
+            # 시 + 동/읍/면
+            r'(.*?시)\s+(.*?(?:동|읍|면))\s*',
+        ]
+        
+        for pattern in city_patterns:
+            match = re.search(pattern, address)
+            if match:
+                matched_parts = [part.strip() for part in match.groups() if part]
+                cleaned = ' '.join(matched_parts)
+                
+                if cleaned and len(cleaned) >= 5:  # 너무 짧으면 무시
+                    print(f"주소 전처리 (행정구역): '{original}' -> '{cleaned}'")
+                    return cleaned
+    
+    # 5. 변화가 있으면 결과 출력
+    if address != original and address:
+        print(f"주소 전처리 (건물명제거): '{original}' -> '{address}'")
+        return address
+    
+    # 6. 변화 없으면 원본 반환
+    return original
+
 async def geocode_address(address: str) -> Dict[str, float]:
+    """
+    주소를 좌표로 변환
+    1차: 전처리된 주소
+    2차: 원본 주소
+    3차: 축약된 주소 (시+구 또는 시+동)
+    """
     if not address or not KAKAO_API_KEY:
-        return {"lat": 36.3504, "lng": 127.3845}
+        log_system_event("WARNING", "GEOCODING", "주소 또는 API 키 없음")
+        return None
+    
+    import re
+    
+    # 전처리
+    cleaned_address = preprocess_address(address)
     
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
+            # 1차 시도: 전처리된 주소
             response = await client.get(
                 KAKAO_GEO,
                 headers={"Authorization": f"KakaoAK {KAKAO_API_KEY}"},
-                params={"query": address}
+                params={"query": cleaned_address}
             )
             
             if response.status_code == 200:
@@ -688,12 +796,81 @@ async def geocode_address(address: str) -> Dict[str, float]:
                         "lat": float(coord["y"]),
                         "lng": float(coord["x"])
                     }
-                    log_system_event("DEBUG", "GEOCODING", f"주소 변환 성공: {address} -> {result}")
+                    log_system_event("DEBUG", "GEOCODING", 
+                                   f"✅ 1차 성공: '{original_for_log(address, cleaned_address)}' -> {result}")
                     return result
+            
+            # 2차 시도: 원본 주소
+            if cleaned_address != address:
+                response = await client.get(
+                    KAKAO_GEO,
+                    headers={"Authorization": f"KakaoAK {KAKAO_API_KEY}"},
+                    params={"query": address}
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    documents = data.get("documents", [])
+                    
+                    if documents:
+                        coord = documents[0]
+                        result = {
+                            "lat": float(coord["y"]),
+                            "lng": float(coord["x"])
+                        }
+                        log_system_event("DEBUG", "GEOCODING", 
+                                       f"✅ 2차 성공 (원본): '{address}' -> {result}")
+                        return result
+            
+            # 3차 시도: 더 짧게 (시+구/군 또는 시+동/읍)
+            short_patterns = [
+                r'(.*?(?:특별시|광역시))\s+(.*?(?:구|군))',
+                r'(.*?도)\s+(.*?시)\s+(.*?구)',
+                r'(.*?시)\s+(.*?구)',
+                r'(.*?시)\s+(.*?(?:동|읍))',
+            ]
+            
+            for pattern in short_patterns:
+                match = re.search(pattern, address)
+                if match:
+                    short_address = ' '.join(match.groups()).strip()
+                    
+                    response = await client.get(
+                        KAKAO_GEO,
+                        headers={"Authorization": f"KakaoAK {KAKAO_API_KEY}"},
+                        params={"query": short_address}
+                    )
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        documents = data.get("documents", [])
+                        
+                        if documents:
+                            coord = documents[0]
+                            result = {
+                                "lat": float(coord["y"]),
+                                "lng": float(coord["x"])
+                            }
+                            log_system_event("DEBUG", "GEOCODING", 
+                                           f"✅ 3차 성공 (축약): '{address}' -> '{short_address}' -> {result}")
+                            return result
+                    
+                    break
+            
+            # 모든 시도 실패
+            log_system_event("WARNING", "GEOCODING", 
+                           f"❌ 검색 실패: '{address}'")
+            return None
+            
     except Exception as e:
-        log_system_event("ERROR", "GEOCODING", f"지오코딩 실패 ({address}): {e}")
-    
-    return {"lat": 36.3504, "lng": 127.3845}
+        log_system_event("ERROR", "GEOCODING", f"오류: '{address}' - {e}")
+        return None
+
+def original_for_log(original, cleaned):
+    """로그 출력용 헬퍼 함수"""
+    if original == cleaned:
+        return original
+    return f"{original} -> {cleaned}"
 
 async def fetch_cctv_data(lat: float, lng: float, radius: int = 1000):
     if not ITS_CCTV_API_KEY:
@@ -897,7 +1074,7 @@ async def start_optimized_polling():
         try:
             cached_data = api_manager.get_cached_data()
             if cached_data:
-                print(f"캐시된 데이터 사용 중 (나이: {time.time() - api_manager.cache_timestamp:.0f}초)")
+                print(f"캐시된 데이터 사용 중")
                 await asyncio.sleep(300)
                 continue
             
@@ -926,9 +1103,18 @@ async def start_optimized_polling():
             for person_data in processed_data:
                 person = MissingPerson(**person_data)
                 
-                coord = await geocode_address(person.location)
-                person.lat = coord["lat"]
-                person.lng = coord["lng"]
+                # 지오코딩 시도
+                if person.location:
+                    coord = await geocode_address(person.location)
+                    if coord:  # 성공한 경우만 좌표 업데이트
+                        person.lat = coord["lat"]
+                        person.lng = coord["lng"]
+                    else:
+                        # 실패 시 좌표를 None으로 설정하여 지도에 표시하지 않음
+                        person.lat = None
+                        person.lng = None
+                        log_system_event("WARNING", "GEOCODING", 
+                                       f"좌표 변환 실패 - 지도 미표시: {person.name} ({person.location})")
                 
                 save_missing_person(person)
                 
@@ -938,24 +1124,20 @@ async def start_optimized_polling():
                     updated_persons.append(person)
             
             if new_persons or updated_persons:
-                log_system_event("INFO", "POLLING", f"데이터 업데이트: 신규 {len(new_persons)}명, 갱신 {len(updated_persons)}명")
+                log_system_event("INFO", "POLLING", 
+                               f"데이터 업데이트: 신규 {len(new_persons)}명, 갱신 {len(updated_persons)}명")
                 
                 await manager.broadcast({
-                    "type": "data_update",
-                    "new_count": len(new_persons),
-                    "updated_count": len(updated_persons),
-                    "timestamp": datetime.now().isoformat()
+                    "type": "update",
+                    "new": len(new_persons),
+                    "updated": len(updated_persons)
                 })
-                
-                for person in new_persons:
-                    if person.priority in ["HIGH", "URGENT"]:
-                        await send_fcm_notification(person)
             
-            await asyncio.sleep(900)
+            await asyncio.sleep(300)
             
         except Exception as e:
             log_system_event("ERROR", "POLLING", f"폴링 오류: {e}")
-            await asyncio.sleep(300)
+            await asyncio.sleep(60)
 
 async def cleanup_old_data():
     while True:
@@ -1106,48 +1288,70 @@ async def create_missing_person(request: Dict[str, Any] = Body(...)):
             age=missing_person_data.get("age"),
             gender=missing_person_data.get("gender"),
             location=missing_person_data.get("location"),
-            description=missing_person_data.get("description", ""),
+            description=missing_person_data.get("description"),
             photo_base64=photo_data,
-            priority="MEDIUM",
-            risk_factors=[],
-            ner_entities={},
-            extracted_features={},
-            lat=missing_person_data.get("lat", 36.5),
-            lng=missing_person_data.get("lng", 127.8),
+            priority="HIGH",
             created_at=current_time,
-            status=missing_person_data.get("status", "PENDING"),
-            category=missing_person_data.get("category", "기타"),
-            source="MANUAL_REPORT"
+            updated_at=current_time,
+            source="REPORTER",
+            category=_categorize_by_age(missing_person_data.get("age", 0)),
+            last_seen=missing_person_data.get("missing_datetime"),
+            emergency_contact=missing_person_data.get("reporter_phone")
         )
         
-        if missing_person_data.get("location"):
-            coord = await geocode_address(missing_person_data["location"])
+        if missing_person.location:
+            coord = await geocode_address(missing_person.location)
             missing_person.lat = coord["lat"]
             missing_person.lng = coord["lng"]
         
-        save_missing_person(missing_person)
+        # 데이터베이스 저장
+        conn = sqlite3.connect('missing_persons.db')
+        cursor = conn.cursor()
         
-        print(f"신고 접수 완료: {missing_person.name} (ID: {person_id})")
+        # INSERT 문에 approval_status 추가
+        cursor.execute('''
+            INSERT INTO missing_persons (
+                id, name, age, gender, location, description, photo_url, photo_base64,
+                priority, risk_factors, ner_entities, extracted_features, lat, lng,
+                created_at, updated_at, status, category, source, confidence_score,
+                last_seen, clothing_description, medical_condition, emergency_contact,
+                approval_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            missing_person.id, missing_person.name, missing_person.age, missing_person.gender,
+            missing_person.location, missing_person.description, missing_person.photo_url,
+            missing_person.photo_base64, missing_person.priority,
+            json.dumps(missing_person.risk_factors),
+            json.dumps(missing_person.ner_entities),
+            json.dumps(missing_person.extracted_features),
+            missing_person.lat, missing_person.lng,
+            missing_person.created_at, missing_person.updated_at,
+            "ACTIVE", missing_person.category, missing_person.source,
+            missing_person.confidence_score, missing_person.last_seen,
+            missing_person.clothing_description, missing_person.medical_condition,
+            missing_person.emergency_contact,
+            "PENDING"  # 승인 대기 상태
+        ))
         
-        log_system_event("INFO", "MANUAL_REPORT", 
-                        f"수동 신고 접수: {missing_person.name} ({missing_person_data.get('reporter_name')})")
+        conn.commit()
+        conn.close()
+        
+        log_system_event("INFO", "REPORT", f"새로운 실종자 신고: {missing_person.name}")
         
         await manager.broadcast({
-            "type": "new_missing_person",
-            "data": missing_person.dict(),
-            "source": "manual_report"
+            "type": "new_report_pending",
+            "person": missing_person.dict()
         })
         
         return {
-            "status": "success",
-            "message": "실종자 신고가 접수되었습니다",
+            "success": True,
+            "message": "실종자 신고가 접수되었습니다. 관리자의 승인을 기다려주세요.",
             "person_id": person_id
         }
         
     except Exception as e:
-        print(f"신고 접수 실패: {e}")
-        log_system_event("ERROR", "MANUAL_REPORT", f"신고 접수 실패: {e}")
-        raise HTTPException(status_code=500, detail=f"신고 접수 실패: {str(e)}")
+        log_system_event("ERROR", "REPORT", f"신고 접수 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 async def get_real_time_stats():
     conn = sqlite3.connect('missing_persons.db')
@@ -1257,6 +1461,16 @@ async def get_missing_persons_api(
     except Exception as e:
         log_system_event("ERROR", "API", f"실종자 목록 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+def _categorize_by_age(age: int) -> str:
+    if age <= 6:
+        return '미취학아동'
+    elif age <= 18:
+        return '학령기아동'
+    elif age >= 65:
+        return '치매환자'
+    else:
+        return '성인가출'
 
 @app.get("/api/person/{person_id}")
 async def get_person_detail(person_id: str):
@@ -1817,6 +2031,161 @@ async def health_check():
         "version": "2.0.0",
         "uptime": time.time() - api_manager.last_request_time if api_manager.last_request_time else 0
     }
+
+@app.post("/api/missing_persons/{person_id}/approve")
+async def approve_missing_person(person_id: str):
+    try:
+        conn = sqlite3.connect('missing_persons.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE missing_persons 
+            SET approval_status = 'APPROVED', 
+                updated_at = ?
+            WHERE id = ? AND source = 'REPORTER'
+        ''', (datetime.now().isoformat(), person_id))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            raise HTTPException(status_code=404, detail="실종자를 찾을 수 없습니다")
+        
+        conn.commit()
+        
+        # 승인된 실종자 정보 조회
+        cursor.execute('SELECT * FROM missing_persons WHERE id = ?', (person_id,))
+        person = cursor.fetchone()
+        conn.close()
+        
+        log_system_event("INFO", "APPROVAL", f"실종자 승인: {person_id}")
+        
+        # 웹소켓으로 업데이트 알림
+        await manager.broadcast({
+            "type": "person_approved",
+            "person_id": person_id
+        })
+        
+        return {"success": True, "message": "실종자가 승인되었습니다"}
+        
+    except Exception as e:
+        log_system_event("ERROR", "APPROVAL", f"승인 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/missing_persons/{person_id}/reject")
+async def reject_missing_person(person_id: str, reason: str = Body(None)):
+    try:
+        conn = sqlite3.connect('missing_persons.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE missing_persons 
+            SET approval_status = 'REJECTED',
+                status = 'INACTIVE',
+                updated_at = ?
+            WHERE id = ? AND source = 'REPORTER'
+        ''', (datetime.now().isoformat(), person_id))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            raise HTTPException(status_code=404, detail="실종자를 찾을 수 없습니다")
+        
+        conn.commit()
+        conn.close()
+        
+        log_system_event("INFO", "APPROVAL", f"실종자 거절: {person_id}, 사유: {reason}")
+        
+        await manager.broadcast({
+            "type": "person_rejected",
+            "person_id": person_id
+        })
+        
+        return {"success": True, "message": "실종자 신고가 거절되었습니다"}
+        
+    except Exception as e:
+        log_system_event("ERROR", "APPROVAL", f"거절 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/missing_persons/{person_id}")
+async def delete_missing_person(person_id: str):
+    try:
+        conn = sqlite3.connect('missing_persons.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE missing_persons 
+            SET status = 'DELETED', updated_at = ?
+            WHERE id = ?
+        ''', (datetime.now().isoformat(), person_id))
+        
+        if cursor.rowcount == 0:
+            conn.close()
+            raise HTTPException(status_code=404, detail="실종자를 찾을 수 없습니다")
+        
+        conn.commit()
+        conn.close()
+        
+        log_system_event("INFO", "DELETE", f"실종자 삭제: {person_id}")
+        
+        await manager.broadcast({
+            "type": "person_deleted",
+            "person_id": person_id
+        })
+        
+        return {"success": True, "message": "실종자가 삭제되었습니다"}
+        
+    except Exception as e:
+        log_system_event("ERROR", "DELETE", f"삭제 실패: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 5. 대기 중인 신고 목록 조회 API 추가
+@app.get("/api/pending_reports")
+async def get_pending_reports():
+    try:
+        conn = sqlite3.connect('missing_persons.db')
+        cursor = conn.cursor()
+        
+        # approval_status 컬럼이 있는지 확인
+        cursor.execute("PRAGMA table_info(missing_persons)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if 'approval_status' in columns:
+            # approval_status 컬럼이 있으면 사용
+            cursor.execute('''
+                SELECT id, name, age, gender, location, description, photo_base64,
+                       created_at, last_seen, emergency_contact, category
+                FROM missing_persons 
+                WHERE source = 'REPORTER' AND approval_status = 'PENDING'
+                ORDER BY created_at DESC
+            ''')
+        else:
+            # approval_status 컬럼이 없으면 source만으로 필터링
+            cursor.execute('''
+                SELECT id, name, age, gender, location, description, photo_base64,
+                       created_at, last_seen, emergency_contact, category
+                FROM missing_persons 
+                WHERE source = 'REPORTER' AND status = 'ACTIVE'
+                ORDER BY created_at DESC
+            ''')
+        
+        columns_names = [description[0] for description in cursor.description]
+        reports = []
+        
+        for row in cursor.fetchall():
+            report_dict = dict(zip(columns_names, row))
+            reports.append(report_dict)
+        
+        conn.close()
+        
+        return {"reports": reports, "count": len(reports)}
+        
+    except Exception as e:
+        log_system_event("ERROR", "API", f"대기 신고 조회 실패: {e}")
+        print(f"Error in get_pending_reports: {e}")  # 디버깅용
+        import traceback
+        traceback.print_exc()  # 상세 에러 출력
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
 async def get_admin_dashboard():
