@@ -2096,7 +2096,7 @@
                 try {
                     const response = await fetch(`${API_BASE_URL}/api/missing_persons`);
                     const data = await response.json();
-                    this.persons = data.data || [];
+                    this.persons = data.persons || [];
                     
                     this.persons.forEach(person => {
                         this.personVisibility[person.id] = true;

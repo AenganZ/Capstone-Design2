@@ -4,8 +4,7 @@ import json
 import sqlite3
 import asyncio
 import httpx
-import re
-import base64
+import uuid
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional, Union
@@ -1033,6 +1032,30 @@ async def update_analytics():
         except Exception as e:
             log_system_event("ERROR", "ANALYTICS", f"분석 데이터 업데이트 실패: {e}")
 
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket, "admin")
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            if message.get("type") == "ping":
+                await manager.send_personal_message(websocket, {
+                    "type": "pong", 
+                    "timestamp": datetime.now().isoformat()
+                })
+            elif message.get("type") == "request_stats":
+                stats = await get_real_time_stats()
+                await manager.send_personal_message(websocket, {
+                    "type": "stats_update", 
+                    "data": stats
+                })
+                
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        print("WebSocket 연결 해제")
+
 @app.websocket("/ws/admin")
 async def websocket_admin_endpoint(websocket: WebSocket):
     await manager.connect(websocket, "admin")
@@ -1065,6 +1088,66 @@ async def websocket_driver_endpoint(websocket: WebSocket, driver_id: str):
                 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+@app.post("/api/missing_persons")
+async def create_missing_person(request: Dict[str, Any] = Body(...)):
+    try:
+        print(f"신고 접수 요청 받음: {request}")
+        
+        missing_person_data = request.get("missing_person", {})
+        photo_data = request.get("photo_data")
+        
+        person_id = str(uuid.uuid4())
+        current_time = datetime.now().isoformat()
+        
+        missing_person = MissingPerson(
+            id=person_id,
+            name=missing_person_data.get("name"),
+            age=missing_person_data.get("age"),
+            gender=missing_person_data.get("gender"),
+            location=missing_person_data.get("location"),
+            description=missing_person_data.get("description", ""),
+            photo_base64=photo_data,
+            priority="MEDIUM",
+            risk_factors=[],
+            ner_entities={},
+            extracted_features={},
+            lat=missing_person_data.get("lat", 36.5),
+            lng=missing_person_data.get("lng", 127.8),
+            created_at=current_time,
+            status=missing_person_data.get("status", "PENDING"),
+            category=missing_person_data.get("category", "기타"),
+            source="MANUAL_REPORT"
+        )
+        
+        if missing_person_data.get("location"):
+            coord = await geocode_address(missing_person_data["location"])
+            missing_person.lat = coord["lat"]
+            missing_person.lng = coord["lng"]
+        
+        save_missing_person(missing_person)
+        
+        print(f"신고 접수 완료: {missing_person.name} (ID: {person_id})")
+        
+        log_system_event("INFO", "MANUAL_REPORT", 
+                        f"수동 신고 접수: {missing_person.name} ({missing_person_data.get('reporter_name')})")
+        
+        await manager.broadcast({
+            "type": "new_missing_person",
+            "data": missing_person.dict(),
+            "source": "manual_report"
+        })
+        
+        return {
+            "status": "success",
+            "message": "실종자 신고가 접수되었습니다",
+            "person_id": person_id
+        }
+        
+    except Exception as e:
+        print(f"신고 접수 실패: {e}")
+        log_system_event("ERROR", "MANUAL_REPORT", f"신고 접수 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"신고 접수 실패: {str(e)}")
 
 async def get_real_time_stats():
     conn = sqlite3.connect('missing_persons.db')
