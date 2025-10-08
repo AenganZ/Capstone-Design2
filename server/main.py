@@ -682,14 +682,6 @@ async def send_to_ner_server(raw_data_list: List[Dict]) -> List[Dict]:
         return []
 
 def preprocess_address(address: str) -> str:
-    """
-    주소를 전처리하여 지오코딩 성공률을 높임
-    
-    중요 규칙:
-    1. 도로명 주소의 번호는 절대 건드리지 않음 (비슬로116길, 지족로148번길)
-    2. 도로명 주소("~로", "~길")는 건드리지 않음 (읍성로, 동문로79번길)
-    3. 행정구역("~동", "~읍", "~면", "~리")은 보존
-    """
     if not address:
         return address
     
@@ -698,11 +690,9 @@ def preprocess_address(address: str) -> str:
     original = address.strip()
     address = original
     
-    # 1. 특수문자 제거 (@, /, \)
     address = re.sub(r'[@/\\]', ' ', address)
     address = re.sub(r'\s+', ' ', address).strip()
     
-    # 2. 건물명만 제거 (공백 뒤에 오는 건물명)
     building_patterns = [
         r'\s+[가-힣0-9]+아파트\b',
         r'\s+[가-힣0-9]+빌라\b',
@@ -718,152 +708,141 @@ def preprocess_address(address: str) -> str:
     
     address = re.sub(r'\s+', ' ', address).strip()
     
-    # 3. 끝의 번지수만 제거 (예: "123-456" 또는 "123")
-    # 단, 도로명 뒤의 번호는 제거하지 않음
-    if not re.search(r'[로길]', address):  # 도로명이 없는 경우만
+    has_road_name = bool(re.search(r'[로길]\s*\d*[번]?[길]?\s*$', address))
+    
+    if not has_road_name:
         address = re.sub(r'\s+\d+-\d+\s*$', '', address)
         address = re.sub(r'\s+\d+\s*$', '', address)
     
     address = address.strip()
     
-    # 4. 패턴 매칭: 행정구역 추출
-    # 주의: 도로명("~로", "~길")과 행정구역("~동", "~읍", "~면", "~리")을 구분!
-    
-    # 먼저 도로명 주소인지 확인
-    has_road_name = bool(re.search(r'[로길]\s*\d*[번]?[길]?\s*$', address))
-    
-    if not has_road_name:
-        # 도로명이 없으면 행정구역만 추출
-        city_patterns = [
-            # 시/도 + 구/군 + 동/읍/면/리
-            r'(.*?(?:특별시|광역시|도))\s+(.*?(?:시|군|구))\s+(.*?(?:동|읍|면|리))\s*',
-            # 시 + 구 + 동
-            r'(.*?시)\s+(.*?구)\s+(.*?동)\s*',
-            # 시 + 동/읍/면
-            r'(.*?시)\s+(.*?(?:동|읍|면))\s*',
-        ]
-        
-        for pattern in city_patterns:
-            match = re.search(pattern, address)
-            if match:
-                matched_parts = [part.strip() for part in match.groups() if part]
-                cleaned = ' '.join(matched_parts)
-                
-                if cleaned and len(cleaned) >= 5:  # 너무 짧으면 무시
-                    print(f"주소 전처리 (행정구역): '{original}' -> '{cleaned}'")
-                    return cleaned
-    
-    # 5. 변화가 있으면 결과 출력
     if address != original and address:
-        print(f"주소 전처리 (건물명제거): '{original}' -> '{address}'")
-        return address
+        print(f"주소 전처리: '{original}' -> '{address}'")
     
-    # 6. 변화 없으면 원본 반환
-    return original
+    return address if address else original
 
 async def geocode_address(address: str) -> Dict[str, float]:
-    """
-    주소를 좌표로 변환
-    1차: 전처리된 주소
-    2차: 원본 주소
-    3차: 축약된 주소 (시+구 또는 시+동)
-    """
     if not address or not KAKAO_API_KEY:
-        log_system_event("WARNING", "GEOCODING", "주소 또는 API 키 없음")
         return None
     
     import re
     
-    # 전처리
-    cleaned_address = preprocess_address(address)
+    original = address
+    attempts = []
+    
+    # 1단계: 전처리된 주소
+    cleaned = preprocess_address(address)
+    attempts.append(("전처리", cleaned))
+    
+    # 2단계: 원본 주소
+    attempts.append(("원본", original))
+    
+    # 3단계: 대전 구/동 패턴 매칭
+    daejeon_patterns = [
+        # 구 + 동
+        r'(동구|중구|서구|유성구|대덕구)\s*(.*?동)',
+        # 동만 있는 경우
+        r'^(둔산동|탄방동|궁동|봉명동|가양동|신성동|판암동|용운동|대동|은행동|선화동|목동|중촌동|법동|관평동|구즉동|노은동|전민동|복수동|오정동|가수원동)',
+    ]
+    
+    for pattern in daejeon_patterns:
+        match = re.search(pattern, original)
+        if match:
+            if len(match.groups()) == 2:
+                # 구 + 동
+                gu, dong = match.groups()
+                attempts.append(("구동", f"대전광역시 {gu} {dong}"))
+            else:
+                # 동만
+                dong = match.group(1)
+                # 주요 동의 구 매핑
+                dong_to_gu = {
+                    '둔산동': '서구', '탄방동': '서구', '궁동': '유성구',
+                    '봉명동': '유성구', '가양동': '동구', '신성동': '유성구',
+                    '판암동': '동구', '용운동': '서구', '대동': '동구',
+                    '은행동': '중구', '선화동': '중구', '목동': '중구',
+                    '중촌동': '동구', '법동': '유성구', '관평동': '유성구',
+                    '구즉동': '유성구', '노은동': '유성구', '전민동': '유성구',
+                    '복수동': '서구', '오정동': '대덕구', '가수원동': '서구'
+                }
+                gu = dong_to_gu.get(dong, '중구')
+                attempts.append(("동추론", f"대전광역시 {gu} {dong}"))
+    
+    # 4단계: 대전 랜드마크 키워드
+    daejeon_landmarks = {
+        '대전역': '대전광역시 동구 대전로',
+        '서대전역': '대전광역시 서구 서대전로',
+        '유성온천': '대전광역시 유성구 온천동',
+        'KAIST': '대전광역시 유성구 대학로',
+        '엑스포': '대전광역시 유성구 엑스포로',
+        '한밭수목원': '대전광역시 서구 둔산대로',
+        '보문산': '대전광역시 중구 보문로',
+        '대청댐': '대전광역시 동구 대청호',
+        '계룡산': '대전광역시 유성구 계룡산',
+        '복합터미널': '대전광역시 동구 정동',
+        '시외버스터미널': '대전광역시 동구 정동',
+        '터미널': '대전광역시 동구 정동',
+        '정부청사': '대전광역시 서구 청사로',
+        '둔산': '대전광역시 서구 둔산동',
+        '탄방': '대전광역시 서구 탄방동',
+        '궁동': '대전광역시 유성구 궁동',
+        '갑천': '대전광역시 서구 갑천',
+        '대전천': '대전광역시 중구 대전천',
+    }
+    
+    for keyword, full_address in daejeon_landmarks.items():
+        if keyword in original:
+            attempts.append(("랜드마크", full_address))
+            break
+    
+    # 5단계: "대전" 단어 추가 (없는 경우)
+    if "대전" not in original:
+        attempts.append(("대전추가", f"대전광역시 {original}"))
+        attempts.append(("대전추가2", f"대전 {original}"))
+    
+    # 6단계: 간단한 구 매칭
+    simple_patterns = [
+        (r'동구', '대전광역시 동구'),
+        (r'중구', '대전광역시 중구'),
+        (r'서구', '대전광역시 서구'),
+        (r'유성', '대전광역시 유성구'),
+        (r'대덕', '대전광역시 대덕구'),
+    ]
+    
+    for pattern, prefix in simple_patterns:
+        if re.search(pattern, original):
+            clean_addr = re.sub(r'대전광역시|대전시|대전', '', original).strip()
+            attempts.append(("구매칭", f"{prefix} {clean_addr}"))
     
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # 1차 시도: 전처리된 주소
-            response = await client.get(
-                KAKAO_GEO,
-                headers={"Authorization": f"KakaoAK {KAKAO_API_KEY}"},
-                params={"query": cleaned_address}
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                documents = data.get("documents", [])
+            for desc, test_addr in attempts:
+                if not test_addr or len(test_addr) < 2:
+                    continue
                 
-                if documents:
-                    coord = documents[0]
-                    result = {
-                        "lat": float(coord["y"]),
-                        "lng": float(coord["x"])
-                    }
-                    log_system_event("DEBUG", "GEOCODING", 
-                                   f"✅ 1차 성공: '{original_for_log(address, cleaned_address)}' -> {result}")
-                    return result
-            
-            # 2차 시도: 원본 주소
-            if cleaned_address != address:
                 response = await client.get(
                     KAKAO_GEO,
                     headers={"Authorization": f"KakaoAK {KAKAO_API_KEY}"},
-                    params={"query": address}
+                    params={"query": test_addr}
                 )
                 
                 if response.status_code == 200:
                     data = response.json()
-                    documents = data.get("documents", [])
+                    docs = data.get("documents", [])
                     
-                    if documents:
-                        coord = documents[0]
+                    if docs:
                         result = {
-                            "lat": float(coord["y"]),
-                            "lng": float(coord["x"])
+                            "lat": float(docs[0]["y"]),
+                            "lng": float(docs[0]["x"])
                         }
-                        log_system_event("DEBUG", "GEOCODING", 
-                                       f"✅ 2차 성공 (원본): '{address}' -> {result}")
+                        print(f"{desc}: '{original}' -> '{test_addr}' -> {result}")
                         return result
             
-            # 3차 시도: 더 짧게 (시+구/군 또는 시+동/읍)
-            short_patterns = [
-                r'(.*?(?:특별시|광역시))\s+(.*?(?:구|군))',
-                r'(.*?도)\s+(.*?시)\s+(.*?구)',
-                r'(.*?시)\s+(.*?구)',
-                r'(.*?시)\s+(.*?(?:동|읍))',
-            ]
-            
-            for pattern in short_patterns:
-                match = re.search(pattern, address)
-                if match:
-                    short_address = ' '.join(match.groups()).strip()
-                    
-                    response = await client.get(
-                        KAKAO_GEO,
-                        headers={"Authorization": f"KakaoAK {KAKAO_API_KEY}"},
-                        params={"query": short_address}
-                    )
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        documents = data.get("documents", [])
-                        
-                        if documents:
-                            coord = documents[0]
-                            result = {
-                                "lat": float(coord["y"]),
-                                "lng": float(coord["x"])
-                            }
-                            log_system_event("DEBUG", "GEOCODING", 
-                                           f"✅ 3차 성공 (축약): '{address}' -> '{short_address}' -> {result}")
-                            return result
-                    
-                    break
-            
-            # 모든 시도 실패
-            log_system_event("WARNING", "GEOCODING", 
-                           f"❌ 검색 실패: '{address}'")
+            print(f"모두 실패: '{original}'")
             return None
             
     except Exception as e:
-        log_system_event("ERROR", "GEOCODING", f"오류: '{address}' - {e}")
+        print(f"지오코딩 오류: {e}")
         return None
 
 def original_for_log(original, cleaned):

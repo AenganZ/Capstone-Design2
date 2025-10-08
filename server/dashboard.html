@@ -1397,11 +1397,46 @@
                         <h4 style="color: #1e40af; font-weight: 600; margin-bottom: 0.5rem;">📋 상세 추가 정보</h4>
                         <ul style="margin: 0; padding-left: 1.5rem;">
                             ${person.extracted_features['추가정보'].map(info => 
-                                `<li style="margin-bottom: 0.5rem;">${info}</li>`
+                                `<li style="margin-bottom: 0.5rem; line-height: 1.5;">${info}</li>`
                             ).join('')}
                         </ul>
                     </div>
                     ` : ''}
+
+                    ${person.extracted_features ? (() => {
+                        const features = person.extracted_features;
+                        const featureCategories = {
+                            'basic_info': { title: '기본 정보', color: '#dbeafe', icon: '👤' },
+                            'appearance': { title: '외모 특징', color: '#fef3c7', icon: '👁️' },
+                            'clothing': { title: '의복', color: '#e0e7ff', icon: '👕' },
+                            'behavior': { title: '행동 특성', color: '#fce7f3', icon: '🚶' },
+                            'health': { title: '건강 상태', color: '#fee2e2', icon: '💊' },
+                            'items': { title: '소지품', color: '#d1fae5', icon: '🎒' },
+                            'transport': { title: '이동수단', color: '#cffafe', icon: '🚗' },
+                            'additional': { title: '기타 정보', color: '#f3f4f6', icon: 'ℹ️' }
+                        };
+                        
+                        let html = '';
+                        for (const [key, value] of Object.entries(features)) {
+                            if (key === '추가정보' || !value || value.length === 0) continue;
+                            
+                            const category = featureCategories[key];
+                            if (!category) continue;
+                            
+                            html += `
+                            <div style="background: ${category.color}; padding: 0.75rem; border-radius: 6px; margin-bottom: 0.75rem;">
+                                <h5 style="font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9rem;">
+                                    ${category.icon} ${category.title}
+                                </h5>
+                                <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem;">
+                                    ${value.map(item => 
+                                        `<span style="background: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem;">${item}</span>`
+                                    ).join('')}
+                                </div>
+                            </div>`;
+                        }
+                        return html;
+                    })() : ''}
                     
                     ${person.risk_factors && person.risk_factors.length > 0 ? `
                     <div style="margin-bottom: 1rem;">
@@ -1607,7 +1642,7 @@
                 try {
                     const mapContainer = document.getElementById('map');
                     const mapOption = {
-                        center: new kakao.maps.LatLng(36.3504119, 127.3845475),
+                        center: new kakao.maps.LatLng(36.3504, 127.3845),
                         level: 8
                     };
 
