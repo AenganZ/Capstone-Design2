@@ -1,6 +1,3 @@
-// Firebase 설정 파일
-// missing-person-alert-94fcd 프로젝트용
-
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
@@ -34,40 +31,38 @@ class DefaultFirebaseOptions {
     }
   }
 
-  // missing-person-alert-94fcd 프로젝트 설정
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyBh5ZrIqW8f9qJ5L4kGtYvN2CxMpDsE8Fg', // 임시값 - Firebase Console에서 정확한 값으로 교체 필요
-    appId: '1:123456789:web:abcdef1234567890', // 임시값 - Firebase Console에서 정확한 값으로 교체 필요
-    messagingSenderId: '123456789', // 임시값 - Firebase Console에서 정확한 값으로 교체 필요
-    projectId: 'missing-person-alert-94fcd', // 확정된 프로젝트 ID
+    apiKey: 'AIzaSyAfWT0ETs0gwl1sqkWLX3Y4OvreVkkJblY',
+    appId: '1:527805312261:web:a02b1eec78485eda0d9b6c',
+    messagingSenderId: '527805312261',
+    projectId: 'missing-person-alert-94fcd',
     authDomain: 'missing-person-alert-94fcd.firebaseapp.com',
-    storageBucket: 'missing-person-alert-94fcd.appspot.com',
-    measurementId: 'G-XXXXXXXXXX', // Firebase Console에서 확인 필요
+    storageBucket: 'missing-person-alert-94fcd.firebasestorage.app',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyBh5ZrIqW8f9qJ5L4kGtYvN2CxMpDsE8Fg', // 임시값 - Firebase Console에서 정확한 값으로 교체 필요
-    appId: '1:123456789:android:abcdef1234567890', // 임시값 - Firebase Console에서 정확한 값으로 교체 필요
-    messagingSenderId: '123456789', // 임시값 - Firebase Console에서 정확한 값으로 교체 필요
-    projectId: 'missing-person-alert-94fcd', // 확정된 프로젝트 ID
-    storageBucket: 'missing-person-alert-94fcd.appspot.com',
+    apiKey: 'AIzaSyAfWT0ETs0gwl1sqkWLX3Y4OvreVkkJblY',
+    appId: '1:527805312261:android:a02b1eec78485eda0d9b6c',
+    messagingSenderId: '527805312261',
+    projectId: 'missing-person-alert-94fcd',
+    storageBucket: 'missing-person-alert-94fcd.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyBh5ZrIqW8f9qJ5L4kGtYvN2CxMpDsE8Fg', // 임시값 - Firebase Console에서 정확한 값으로 교체 필요
-    appId: '1:123456789:ios:abcdef1234567890', // 임시값 - Firebase Console에서 정확한 값으로 교체 필요
-    messagingSenderId: '123456789', // 임시값 - Firebase Console에서 정확한 값으로 교체 필요
-    projectId: 'missing-person-alert-94fcd', // 확정된 프로젝트 ID
-    storageBucket: 'missing-person-alert-94fcd.appspot.com',
+    apiKey: 'AIzaSyAfWT0ETs0gwl1sqkWLX3Y4OvreVkkJblY',
+    appId: '1:527805312261:ios:a02b1eec78485eda0d9b6c',
+    messagingSenderId: '527805312261',
+    projectId: 'missing-person-alert-94fcd',
+    storageBucket: 'missing-person-alert-94fcd.firebasestorage.app',
     iosBundleId: 'com.aenganz.reporter',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyBh5ZrIqW8f9qJ5L4kGtYvN2CxMpDsE8Fg', // 임시값 - Firebase Console에서 정확한 값으로 교체 필요
-    appId: '1:123456789:macos:abcdef1234567890', // 임시값 - Firebase Console에서 정확한 값으로 교체 필요
-    messagingSenderId: '123456789', // 임시값 - Firebase Console에서 정확한 값으로 교체 필요
-    projectId: 'missing-person-alert-94fcd', // 확정된 프로젝트 ID
-    storageBucket: 'missing-person-alert-94fcd.appspot.com',
+    apiKey: 'AIzaSyAfWT0ETs0gwl1sqkWLX3Y4OvreVkkJblY',
+    appId: '1:527805312261:macos:a02b1eec78485eda0d9b6c',
+    messagingSenderId: '527805312261',
+    projectId: 'missing-person-alert-94fcd',
+    storageBucket: 'missing-person-alert-94fcd.firebasestorage.app',
     iosBundleId: 'com.aenganz.reporter',
   );
 }

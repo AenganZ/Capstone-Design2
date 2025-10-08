@@ -402,7 +402,16 @@ def process_missing_person(raw_data: dict, ner_model: KPFBertNER) -> ProcessedPe
     
     # etcSpfeatr이 있으면 NER 처리
     ner_entities = {}
-    extracted_features = {}
+    extracted_features = {
+        "basic_info": [],
+        "appearance": [],
+        "clothing": [],
+        "behavior": [],
+        "health": [],
+        "items": [],
+        "transport": [],
+        "additional": []
+    }
     
     if description and description.strip():
         print(f"etcSpfeatr 처리 중: {description[:100]}...")

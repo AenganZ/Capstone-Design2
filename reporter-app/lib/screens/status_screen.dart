@@ -461,7 +461,7 @@ class _StatusScreenState extends State<StatusScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'AenganZ 실종자 신고 앱',
+              '대전시 실종자 신고 앱',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             Text('버전: 1.0.0'),

@@ -609,7 +609,20 @@ def get_existing_person_ids() -> set:
 
 async def fetch_safe182_data():
     try:
-        params = {"rowSize": 100, "page": 1}
+        from datetime import datetime
+        
+        # 2025년 1월 1일부터 오늘까지
+        start_date = "20250101"
+        end_date = datetime.now().strftime("%Y%m%d")
+        
+        params = {
+            "rowSize": 100, 
+            "page": 1,
+            "occrAdres": "대전",
+            "occrde1": start_date,  # 시작 날짜 추가
+            "occrde2": end_date     # 종료 날짜 추가
+        }
+        
         if SAFE182_ESNTL_ID and SAFE182_AUTH_KEY:
             params["esntlId"] = SAFE182_ESNTL_ID
             params["authKey"] = SAFE182_AUTH_KEY
@@ -628,13 +641,10 @@ async def fetch_safe182_data():
             
             # 응답 형식 확인 및 처리
             if isinstance(data, dict):
-                # {"persons": [...]} 형식인 경우
                 if "persons" in data:
                     persons_list = data["persons"]
-                # {"data": [...]} 형식인 경우
                 elif "data" in data:
                     persons_list = data["data"]
-                # {"list": [...]} 형식인 경우
                 elif "list" in data:
                     persons_list = data["list"]
                 else:
@@ -647,7 +657,7 @@ async def fetch_safe182_data():
                 return []
             
             await log_api_request("SAFE182", "GET", len(persons_list), True, response_time)
-            print(f"Safe182에서 {len(persons_list)}명의 실종자 데이터를 가져왔습니다")
+            print(f"✅ Safe182에서 {len(persons_list)}명의 실종자 데이터를 가져왔습니다 ({start_date} ~ {end_date})")
             return persons_list
             
     except Exception as e:
@@ -658,11 +668,50 @@ async def fetch_safe182_data():
 
 async def send_to_ner_server(raw_data_list: List[Dict]) -> List[Dict]:
     try:
+        enriched_data_list = []
+        for raw_data in raw_data_list:
+            enriched_data = {
+                "id": raw_data.get("occrde", "") or str(uuid.uuid4()),
+                "occrde": raw_data.get("occrde", ""),
+                "nm": raw_data.get("nm", ""),
+                "age": raw_data.get("age", ""),
+                "ageNow": raw_data.get("ageNow", ""),
+                "sexdstnDscd": raw_data.get("sexdstnDscd", ""),
+                "occrAdres": raw_data.get("occrAdres", ""),
+                "writngTrgetDscd": raw_data.get("writngTrgetDscd", ""),
+                "alldressingDscd": raw_data.get("alldressingDscd", ""),
+                "etcSpfeatr": raw_data.get("etcSpfeatr", ""),
+                "height": raw_data.get("height", ""),
+                "bdwgh": raw_data.get("bdwgh", ""),
+                "frmDscd": raw_data.get("frmDscd", ""),
+                "faceshpeDscd": raw_data.get("faceshpeDscd", ""),
+                "hairshpeDscd": raw_data.get("hairshpeDscd", ""),
+                "haircolrDscd": raw_data.get("haircolrDscd", ""),
+                "tkphotolength": raw_data.get("tkphotolength", "")
+            }
+            
+            description_parts = []
+            if enriched_data["alldressingDscd"]:
+                description_parts.append(enriched_data["alldressingDscd"])
+            if enriched_data["etcSpfeatr"]:
+                description_parts.append(enriched_data["etcSpfeatr"])
+            if enriched_data["frmDscd"]:
+                description_parts.append(f"체격: {enriched_data['frmDscd']}")
+            if enriched_data["faceshpeDscd"]:
+                description_parts.append(f"얼굴형: {enriched_data['faceshpeDscd']}")
+            if enriched_data["hairshpeDscd"]:
+                description_parts.append(f"두발: {enriched_data['hairshpeDscd']}")
+            if enriched_data["haircolrDscd"]:
+                description_parts.append(f"두발색: {enriched_data['haircolrDscd']}")
+            
+            enriched_data["full_description"] = " ".join(description_parts)
+            enriched_data_list.append(enriched_data)
+        
         async with httpx.AsyncClient(timeout=60.0) as client:
             start_time = time.time()
             response = await client.post(
                 f"{NER_SERVER_URL}/api/process_missing_persons",
-                json={"raw_data_list": raw_data_list}
+                json={"persons": enriched_data_list}
             )
             response_time = time.time() - start_time
             
@@ -728,6 +777,14 @@ async def geocode_address(address: str) -> Dict[str, float]:
     import re
     
     original = address
+    
+    # 대전 지역이 아닌 주소 필터링
+    non_daejeon_keywords = ['서울', '부산', '인천', '광주', '울산', '세종', '경기', '충남', '충북', '전남', '전북', '경남', '경북', '강원', '제주']
+    if any(keyword in original for keyword in non_daejeon_keywords):
+        if '대전' not in original:
+            print(f"대전 지역이 아닌 주소 필터링: '{original}'")
+            return None
+    
     attempts = []
     
     # 1단계: 전처리된 주소
@@ -739,9 +796,7 @@ async def geocode_address(address: str) -> Dict[str, float]:
     
     # 3단계: 대전 구/동 패턴 매칭
     daejeon_patterns = [
-        # 구 + 동
         r'(동구|중구|서구|유성구|대덕구)\s*(.*?동)',
-        # 동만 있는 경우
         r'^(둔산동|탄방동|궁동|봉명동|가양동|신성동|판암동|용운동|대동|은행동|선화동|목동|중촌동|법동|관평동|구즉동|노은동|전민동|복수동|오정동|가수원동)',
     ]
     
@@ -749,13 +804,10 @@ async def geocode_address(address: str) -> Dict[str, float]:
         match = re.search(pattern, original)
         if match:
             if len(match.groups()) == 2:
-                # 구 + 동
                 gu, dong = match.groups()
                 attempts.append(("구동", f"대전광역시 {gu} {dong}"))
             else:
-                # 동만
                 dong = match.group(1)
-                # 주요 동의 구 매핑
                 dong_to_gu = {
                     '둔산동': '서구', '탄방동': '서구', '궁동': '유성구',
                     '봉명동': '유성구', '가양동': '동구', '신성동': '유성구',
@@ -795,7 +847,7 @@ async def geocode_address(address: str) -> Dict[str, float]:
             attempts.append(("랜드마크", full_address))
             break
     
-    # 5단계: "대전" 단어 추가 (없는 경우)
+    # 5단계: "대전" 단어 추가
     if "대전" not in original:
         attempts.append(("대전추가", f"대전광역시 {original}"))
         attempts.append(("대전추가2", f"대전 {original}"))
@@ -831,6 +883,11 @@ async def geocode_address(address: str) -> Dict[str, float]:
                     docs = data.get("documents", [])
                     
                     if docs:
+                        address_name = docs[0].get("address_name", "")
+                        if "대전" not in address_name and address_name:
+                            print(f"대전이 아닌 좌표 결과 무시: '{original}' -> '{address_name}'")
+                            continue
+                        
                         result = {
                             "lat": float(docs[0]["y"]),
                             "lng": float(docs[0]["x"])
@@ -838,7 +895,7 @@ async def geocode_address(address: str) -> Dict[str, float]:
                         print(f"{desc}: '{original}' -> '{test_addr}' -> {result}")
                         return result
             
-            print(f"모두 실패: '{original}'")
+            print(f"대전 지역 좌표 찾기 실패: '{original}'")
             return None
             
     except Exception as e:
@@ -1645,25 +1702,66 @@ async def send_custom_notification(request: NotificationRequest):
         person_row = cursor.fetchone()
         
         if not person_row:
+            conn.close()
             raise HTTPException(status_code=404, detail="실종자를 찾을 수 없습니다")
         
         columns = [desc[0] for desc in cursor.description]
         person_dict = dict(zip(columns, person_row))
+        
+        try:
+            if isinstance(person_dict.get('risk_factors'), str):
+                person_dict['risk_factors'] = json.loads(person_dict['risk_factors']) if person_dict['risk_factors'] else []
+            if isinstance(person_dict.get('ner_entities'), str):
+                person_dict['ner_entities'] = json.loads(person_dict['ner_entities']) if person_dict['ner_entities'] else {}
+            if isinstance(person_dict.get('extracted_features'), str):
+                person_dict['extracted_features'] = json.loads(person_dict['extracted_features']) if person_dict['extracted_features'] else {}
+        except json.JSONDecodeError as e:
+            print(f"JSON 파싱 오류: {e}")
+            person_dict['risk_factors'] = []
+            person_dict['ner_entities'] = {}
+            person_dict['extracted_features'] = {}
+        
         person = MissingPerson(**person_dict)
         
         success = await send_fcm_notification(person, request.message)
         
         conn.close()
         
+        # WebSocket으로 실시간 알림 전송
+        await manager.broadcast({
+            "type": "new_missing_person_notification",
+            "person": {
+                "id": person.id,
+                "name": person.name,
+                "age": person.age,
+                "gender": person.gender,
+                "location": person.location,
+                "description": person.description,
+                "photo_base64": person.photo_base64,
+                "priority": person.priority,
+                "category": person.category,
+                "extracted_features": person.extracted_features,
+                "risk_factors": person.risk_factors,
+                "lat": person.lat,
+                "lng": person.lng,
+            },
+            "message": request.message,
+            "target_count": len(request.target_tokens) if request.target_tokens else 0
+        })
+        
         return {
             "status": "success" if success else "failed",
-            "message": "알림이 전송되었습니다" if success else "알림 전송에 실패했습니다"
+            "message": "알림이 전송되었습니다" if success else "알림 전송에 실패했습니다",
+            "target_count": len(request.target_tokens) if request.target_tokens else 0
         }
         
     except HTTPException:
         raise
     except Exception as e:
         log_system_event("ERROR", "NOTIFICATION", f"사용자 정의 알림 전송 실패: {e}")
+        print(f"알림 전송 오류 상세: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/search_cctv")
@@ -2164,6 +2262,209 @@ async def get_pending_reports():
         print(f"Error in get_pending_reports: {e}")  # 디버깅용
         import traceback
         traceback.print_exc()  # 상세 에러 출력
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/api/sighting_reports")
+async def get_sighting_reports(status: str = "all"):
+    try:
+        conn = sqlite3.connect('missing_persons.db')
+        cursor = conn.cursor()
+        
+        if status == "all":
+            cursor.execute('''
+                SELECT 
+                    sr.id,
+                    sr.person_id,
+                    sr.reporter_id,
+                    sr.reporter_lat as lat,
+                    sr.reporter_lng as lng,
+                    sr.description,
+                    sr.photo_base64 as report_photo,
+                    sr.confidence_level,
+                    sr.status,
+                    sr.reported_at as created_at,
+                    mp.name as person_name,
+                    mp.photo_base64 as person_photo
+                FROM sighting_reports sr
+                LEFT JOIN missing_persons mp ON sr.person_id = mp.id
+                ORDER BY sr.reported_at DESC
+                LIMIT 100
+            ''')
+        else:
+            cursor.execute('''
+                SELECT 
+                    sr.id,
+                    sr.person_id,
+                    sr.reporter_id,
+                    sr.reporter_lat as lat,
+                    sr.reporter_lng as lng,
+                    sr.description,
+                    sr.photo_base64 as report_photo,
+                    sr.confidence_level,
+                    sr.status,
+                    sr.reported_at as created_at,
+                    mp.name as person_name,
+                    mp.photo_base64 as person_photo
+                FROM sighting_reports sr
+                LEFT JOIN missing_persons mp ON sr.person_id = mp.id
+                WHERE sr.status = ?
+                ORDER BY sr.reported_at DESC
+                LIMIT 100
+            ''', (status,))
+        
+        reports = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        
+        report_list = []
+        for row in reports:
+            report_dict = dict(zip(columns, row))
+            report_list.append(report_dict)
+        
+        conn.close()
+        
+        return {
+            "reports": report_list,
+            "count": len(report_list)
+        }
+        
+    except Exception as e:
+        print(f"목격 신고 조회 오류: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/sighting_report/{report_id}")
+async def get_sighting_report_by_id(report_id: int):
+    try:
+        conn = sqlite3.connect('missing_persons.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM sighting_reports WHERE id = ?', (report_id,))
+        report = cursor.fetchone()
+        
+        if not report:
+            conn.close()
+            raise HTTPException(status_code=404, detail="신고를 찾을 수 없습니다")
+        
+        columns = [desc[0] for desc in cursor.description]
+        report_dict = dict(zip(columns, report))
+        
+        conn.close()
+        
+        return report_dict
+        
+    except Exception as e:
+        print(f"신고 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/api/sighting_report/{report_id}/status")
+async def update_report_status(report_id: int, status: str):
+    try:
+        conn = sqlite3.connect('missing_persons.db')
+        cursor = conn.cursor()
+        
+        # 신고 정보 가져오기
+        cursor.execute('SELECT person_id FROM sighting_reports WHERE id = ?', (report_id,))
+        report = cursor.fetchone()
+        
+        if not report:
+            conn.close()
+            raise HTTPException(status_code=404, detail="신고를 찾을 수 없습니다")
+        
+        person_id = report[0]
+        
+        # 상태 업데이트
+        cursor.execute('''
+            UPDATE sighting_reports 
+            SET status = ?
+            WHERE id = ?
+        ''', (status, report_id))
+        
+        # CONFIRMED 상태가 되면 실종자도 "찾음" 상태로 변경
+        if status == 'CONFIRMED':
+            cursor.execute('''
+                UPDATE missing_persons 
+                SET status = 'FOUND', updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (person_id,))
+            
+            log_system_event("UPDATE", "MISSING_PERSON", f"실종자 {person_id} - 목격 확인됨으로 상태 변경")
+            
+            # WebSocket으로 실시간 알림
+            await manager.broadcast({
+                "type": "person_found",
+                "person_id": person_id,
+                "report_id": report_id,
+                "message": "실종자가 발견되었습니다!"
+            })
+        
+        conn.commit()
+        conn.close()
+        
+        log_system_event("UPDATE", "SIGHTING_REPORT", f"신고 #{report_id} 상태 변경: {status}")
+        
+        return {
+            "status": "success",
+            "message": "확인됨" if status == 'CONFIRMED' else "상태가 업데이트되었습니다",
+            "report_id": report_id,
+            "new_status": status,
+            "person_found": status == 'CONFIRMED'
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"신고 상태 업데이트 오류: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/sighting_report/{report_id}")
+async def delete_sighting_report(report_id: int):
+    try:
+        print(f"신고 삭제 요청: ID {report_id}")
+        
+        conn = sqlite3.connect('missing_persons.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT id, person_id, status FROM sighting_reports WHERE id = ?', (report_id,))
+        existing = cursor.fetchone()
+        
+        if not existing:
+            conn.close()
+            print(f"신고 {report_id}를 찾을 수 없음")
+            raise HTTPException(status_code=404, detail=f"신고 #{report_id}를 찾을 수 없습니다")
+        
+        print(f"신고 찾음: {existing}")
+        
+        cursor.execute('DELETE FROM sighting_reports WHERE id = ?', (report_id,))
+        deleted_count = cursor.rowcount
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"신고 {report_id} 삭제 완료 (삭제된 행: {deleted_count})")
+        
+        log_system_event("DELETE", "SIGHTING_REPORT", f"신고 #{report_id} 삭제됨")
+        
+        await manager.broadcast({
+            "type": "sighting_report_deleted",
+            "report_id": report_id
+        })
+        
+        return {
+            "status": "success",
+            "message": "신고가 삭제되었습니다",
+            "report_id": report_id,
+            "deleted_count": deleted_count
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"신고 삭제 오류: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")

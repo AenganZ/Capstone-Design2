@@ -911,6 +911,93 @@
             font-size: 0.75rem;
             font-weight: 600;
         }
+
+        .report-card {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 12px;
+        }
+
+        .report-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .report-person-info {
+            display: flex;
+            gap: 12px;
+        }
+
+        .report-photo {
+            width: 50px;
+            height: 50px;
+            border-radius: 6px;
+            object-fit: cover;
+        }
+
+        .report-name {
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        .report-meta {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .report-status {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-PENDING { background: #fef3c7; color: #92400e; }
+        .status-REVIEWING { background: #dbeafe; color: #1e40af; }
+        .status-CONFIRMED { background: #d1fae5; color: #065f46; }
+        .status-REJECTED { background: #fee2e2; color: #991b1b; }
+
+        .report-content {
+            background: #f9fafb;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            font-size: 13px;
+        }
+
+        .report-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .report-actions button {
+            padding: 6px 12px;
+            font-size: 12px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            color: white;
+        }
+
+        .confidence-badge {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+
+        .confidence-HIGH { background: #d1fae5; color: #065f46; }
+        .confidence-MEDIUM { background: #fef3c7; color: #92400e; }
+        .confidence-LOW { background: #e5e7eb; color: #374151; }
+
     </style>
 </head>
 <body>
@@ -949,6 +1036,7 @@
                 <button class="tab-button" onclick="switchTab('cctv')">CCTV</button>
                 <button class="tab-button" onclick="switchTab('alert')">알림</button>
                 <button class="tab-button" onclick="switchTab('reports')">실종자 신고</button>
+                <button class="tab-button" onclick="switchTab('sighting')">목격 신고</button>
             </div>
             <div id="missing-tab" class="tab-content active">
                 <div class="sidebar-section">
@@ -1097,6 +1185,28 @@
                         <button type="submit" class="btn btn-primary">알림 전송</button>
                     </form>
                     <div id="notificationResult"></div>
+                </div>
+            </div>
+            <!-- 목격 신고 탭 -->
+            <div id="sighting-tab" class="tab-content">
+                <div class="content-area">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; margin-top: 16px;">
+                        <select id="reportStatusFilter" onchange="loadSightingReports(this.value)" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
+                            <option value="all">전체</option>
+                            <option value="PENDING">대기중</option>
+                            <option value="REVIEWING">검토중</option>
+                            <option value="CONFIRMED">확인됨</option>
+                            <option value="REJECTED">기각됨</option>
+                        </select>
+                        <button onclick="loadSightingReports(document.getElementById('reportStatusFilter').value)" style="padding: 8px 16px; background: white; color: #667eea; border: 2px solid #667eea; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                            새로고침
+                        </button>
+                    </div>
+                    <div id="sightingReportsList" style="max-height: calc(100vh - 180px); overflow-y: auto;">
+                        <div style="text-align: center; padding: 40px; color: #666;">
+                            목격 신고를 불러오는 중...
+                        </div>
+                    </div>
                 </div>
             </div>
             <div id="reports-tab" class="tab-content">
@@ -1500,36 +1610,27 @@
                     '기타': '평균적인 수색 범위를 적용합니다.'
                 };
 
-                this.KOREA_LOCATIONS = [
-                    { name: '서울', lat: 37.5665, lng: 126.9780 },
-                    { name: '부산', lat: 35.1796, lng: 129.0756 },
-                    { name: '대구', lat: 35.8714, lng: 128.6014 },
-                    { name: '인천', lat: 37.4563, lng: 126.7052 },
-                    { name: '광주', lat: 35.1595, lng: 126.8526 },
-                    { name: '대전', lat: 36.3504, lng: 127.3845 },
-                    { name: '울산', lat: 35.5384, lng: 129.3114 },
-                    { name: '수원', lat: 37.2636, lng: 127.0286 },
-                    { name: '청주', lat: 36.6424, lng: 127.4890 },
-                    { name: '전주', lat: 35.8242, lng: 127.1480 },
-                    { name: '춘천', lat: 37.8813, lng: 127.7298 },
-                    { name: '세종', lat: 36.4801, lng: 127.2890 },
-                    { name: '포항', lat: 36.0190, lng: 129.3435 },
-                    { name: '창원', lat: 35.2538, lng: 128.6402 },
-                    { name: '고양', lat: 37.6584, lng: 126.8320 },
-                    { name: '용인', lat: 37.2411, lng: 127.1775 },
-                    { name: '성남', lat: 37.4449, lng: 127.1388 },
-                    { name: '부천', lat: 37.5034, lng: 126.7660 },
-                    { name: '안산', lat: 37.3218, lng: 126.8309 },
-                    { name: '안양', lat: 37.3943, lng: 126.9568 },
-                    { name: '평택', lat: 36.9921, lng: 127.1128 },
-                    { name: '의정부', lat: 37.7383, lng: 127.0338 },
-                    { name: '시흥', lat: 37.3802, lng: 126.8028 },
-                    { name: '김포', lat: 37.6159, lng: 126.7154 },
-                    { name: '화성', lat: 37.1996, lng: 127.0313 },
-                    { name: '남양주', lat: 37.6367, lng: 127.2168 },
-                    { name: '파주', lat: 37.7601, lng: 126.7799 },
-                    { name: '의왕', lat: 37.3448, lng: 126.9687 },
-                    { name: '하남', lat: 37.5393, lng: 127.2145 }
+                this.DAEJEON_LOCATIONS = [
+                    { name: '대전역', lat: 36.3315, lng: 127.4350 },
+                    { name: '서대전역', lat: 36.3255, lng: 127.3770 },
+                    { name: '유성온천', lat: 36.3542, lng: 127.3440 },
+                    { name: '둔산동', lat: 36.3504, lng: 127.3780 },
+                    { name: '탄방동', lat: 36.3370, lng: 127.3870 },
+                    { name: '은행동', lat: 36.3275, lng: 127.4265 },
+                    { name: 'KAIST', lat: 36.3736, lng: 127.3650 },
+                    { name: '엑스포', lat: 36.3797, lng: 127.3847 },
+                    { name: '한밭수목원', lat: 36.3678, lng: 127.3895 },
+                    { name: '정부청사', lat: 36.3798, lng: 127.3658 },
+                    { name: '갤러리아', lat: 36.3534, lng: 127.3782 },
+                    { name: '대전복합터미널', lat: 36.3349, lng: 127.4344 },
+                    { name: '중구청', lat: 36.3260, lng: 127.4210 },
+                    { name: '서구청', lat: 36.3553, lng: 127.3837 },
+                    { name: '동구청', lat: 36.3110, lng: 127.4540 },
+                    { name: '유성구청', lat: 36.3624, lng: 127.3567 },
+                    { name: '대덕구청', lat: 36.3469, lng: 127.4166 },
+                    { name: '보문산', lat: 36.3400, lng: 127.4100 },
+                    { name: '대청호', lat: 36.4800, lng: 127.4900 },
+                    { name: '월평공원', lat: 36.3490, lng: 127.3620 }
                 ];
                 
                 this.initWebSocket();
@@ -1605,6 +1706,38 @@
                 return this.SEARCH_DESCRIPTIONS[category] || this.SEARCH_DESCRIPTIONS['기타'];
             }
 
+            isWaterArea(lat, lng) {
+                if (lat >= 36.32 && lat <= 36.38 && lng >= 127.35 && lng <= 127.40) {
+                    if (Math.abs(lng - 127.375) < 0.005) return true;
+                }
+                
+                if (lat >= 36.32 && lat <= 36.35 && lng >= 127.42 && lng <= 127.44) {
+                    if (Math.abs(lng - 127.43) < 0.003) return true;
+                }
+                
+                if (lat >= 36.35 && lat <= 36.37 && lng >= 127.41 && lng <= 127.43) {
+                    if (Math.abs(lat - 36.36) < 0.003) return true;
+                }
+                
+                if (lat >= 36.48) return true;
+                
+                if (lat >= 36.45 && lng <= 127.30) return true;
+                
+                return false;
+            }
+
+            isValidPosition(lat, lng) {
+                if (lat < 36.20 || lat > 36.50 || lng < 127.20 || lng > 127.60) {
+                    return false;
+                }
+                
+                if (this.isWaterArea(lat, lng)) {
+                    return false;
+                }
+                
+                return true;
+            }
+
             async checkServerStatus() {
                 try {
                     const mainResponse = await fetch(`${API_BASE_URL}/api/statistics`);
@@ -1643,7 +1776,7 @@
                     const mapContainer = document.getElementById('map');
                     const mapOption = {
                         center: new kakao.maps.LatLng(36.3504, 127.3845),
-                        level: 8
+                        level: 5
                     };
 
                     this.map = new kakao.maps.Map(mapContainer, mapOption);
@@ -1928,62 +2061,85 @@
 
             startDriverSimulation() {
                 const driverTypes = ['taxi', 'delivery'];
+                const surnames = ['김', '이', '박', '최', '정', '조', '윤', '송', '한', '홍', '강', '황', '임', '오', '서', '신', '권', '남', '안', '전'];
+                
                 const regions = [
-                    { name: '서울', count: 330, baseNames: ['김서울', '이강남', '박종로', '최마포', '정송파', '조서초', '윤강동', '송노원', '한성북', '홍은평'] },
-                    { name: '부산', count: 200, baseNames: ['김부산', '이해운', '박수영', '최사하', '정기장', '조남구', '윤동래', '송서구', '한영도', '홍중구'] },
-                    { name: '대구', count: 150, baseNames: ['김대구', '이수성', '박달서', '최북구', '정중구', '조동구', '윤달성', '송서구', '한남구', '홍수성'] },
-                    { name: '인천', count: 180, baseNames: ['김인천', '이남동', '박연수', '최부평', '정서구', '조중구', '윤동구', '송계양', '한강화', '홍옹진'] },
-                    { name: '광주', count: 120, baseNames: ['김광주', '이서구', '박남구', '최북구', '정동구', '조광산', '윤서구', '송남구', '한북구', '홍동구'] },
-                    { name: '대전', count: 170, baseNames: ['김대전', '이서구', '박유성', '최중구', '정동구', '조대덕', '윤서구', '송중구', '한유성', '홍동구'] },
-                    { name: '울산', count: 100, baseNames: ['김울산', '이남구', '박동구', '최북구', '정중구', '조울주', '윤남구', '송동구', '한북구', '홍중구'] },
-                    { name: '경기', count: 400, baseNames: ['김수원', '이성남', '박고양', '최용인', '정부천', '조안산', '윤안양', '송남양주', '한화성', '홍파주'] },
-                    { name: '강원', count: 80, baseNames: ['김춘천', '이원주', '박강릉', '최동해', '정속초', '조삼척', '윤홍천', '송횡성', '한평창', '홍정선'] },
-                    { name: '충북', count: 70, baseNames: ['김청주', '이충주', '박제천', '최음성', '정진천', '조단양', '윤영동', '송괴산', '한보은', '홍옥천'] },
-                    { name: '충남', count: 90, baseNames: ['김천안', '이아산', '박서산', '최보령', '정당진', '조논산', '윤계룡', '송공주', '한홍성', '홍예산'] },
-                    { name: '전북', count: 75, baseNames: ['김전주', '이군산', '박익산', '최정읍', '정남원', '조김제', '윤완주', '송진안', '한무주', '홍장수'] },
-                    { name: '전남', count: 85, baseNames: ['김목포', '이여수', '박순천', '최나주', '정광양', '조담양', '윤곡성', '송구례', '한고흥', '홍보성'] },
-                    { name: '경북', count: 110, baseNames: ['김포항', '이경주', '박안동', '최구미', '정영주', '조상주', '윤문경', '송김천', '한칠곡', '홍성주'] },
-                    { name: '경남', count: 130, baseNames: ['김창원', '이진주', '박통영', '최사천', '정김해', '조밀양', '윤거제', '송양산', '한의령', '홍함안'] }
+                    { 
+                        name: '동구', 
+                        count: 200, 
+                        locations: ['가양', '대동', '중앙', '자양', '효', '판암', '용운', '대청', '신인', '삼성', '효평', '신상', '홍도', '성남', '정동']
+                    },
+                    { 
+                        name: '중구', 
+                        count: 200, 
+                        locations: ['은행', '선화', '목', '대흥', '문화', '석교', '유천', '대사', '중촌', '옥계']
+                    },
+                    { 
+                        name: '서구', 
+                        count: 200, 
+                        locations: ['둔산', '탄방', '용문', '월평', '변', '갈마', '복수', '도마', '괴정', '가수원', '내', '관저']
+                    },
+                    { 
+                        name: '유성구', 
+                        count: 200, 
+                        locations: ['궁', '봉명', '신성', '관평', '노은', '전민', '구즉', '원신', '지족', '어은', '학하', '온천', '덕명']
+                    },
+                    { 
+                        name: '대덕구', 
+                        count: 200, 
+                        locations: ['오정', '중리', '법', '신탄진', '대화', '읍내', '석봉', '목상', '회덕', '비래', '송촌']
+                    }
                 ];
                 
                 let driverIndex = 0;
                 
                 regions.forEach(region => {
-                    const locations = this.KOREA_LOCATIONS.filter(loc => 
-                        loc.name.includes(region.name) || region.name.includes(loc.name)
-                    );
-                    const baseLocation = locations[0] || this.KOREA_LOCATIONS[0];
-                    
                     for (let i = 0; i < region.count; i++) {
                         const type = driverTypes[Math.floor(Math.random() * driverTypes.length)];
-                        const baseName = region.baseNames[Math.floor(Math.random() * region.baseNames.length)];
+                        const surname = surnames[Math.floor(Math.random() * surnames.length)];
+                        const locationName = region.locations[Math.floor(Math.random() * region.locations.length)];
                         const suffix = type === 'taxi' ? '택시' : '라이더';
-                        const name = baseName + suffix + (i % 50 + 1);
+                        const name = surname + locationName + suffix + (i % 50 + 1);
                         
                         setTimeout(() => {
-                            const newDriver = {
-                                id: 'driver_' + driverIndex++,
-                                name: name,
-                                vehicle: this.generateVehicleNumber(region.name),
-                                phone: '010-' + String(Math.floor(Math.random() * 10000)).padStart(4, '0') + '-' + String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
-                                type: type,
-                                region: region.name,
-                                lat: baseLocation.lat + (Math.random() - 0.5) * 0.3,
-                                lng: baseLocation.lng + (Math.random() - 0.5) * 0.3,
-                                status: Math.random() > 0.25 ? 'online' : 'offline',
-                                speed: Math.random() * 40 + 20,
-                                heading: Math.random() * 360
-                            };
+                            let lat, lng;
+                            let attempts = 0;
                             
-                            this.drivers.push(newDriver);
+                            do {
+                                const baseLocation = this.DAEJEON_LOCATIONS[Math.floor(Math.random() * this.DAEJEON_LOCATIONS.length)];
+                                lat = baseLocation.lat + (Math.random() - 0.5) * 0.08;
+                                lng = baseLocation.lng + (Math.random() - 0.5) * 0.08;
+                                attempts++;
+                            } while (!this.isValidPosition(lat, lng) && attempts < 50);
                             
-                            if (driverIndex % 100 === 0) {
-                                this.updateDriverList();
-                                this.updateDriverMarkers();
+                            if (this.isValidPosition(lat, lng)) {
+                                const newDriver = {
+                                    id: 'driver_' + driverIndex++,
+                                    name: name,
+                                    vehicle: this.generateVehicleNumber('대전'),
+                                    phone: '010-' + String(Math.floor(Math.random() * 10000)).padStart(4, '0') + '-' + String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
+                                    type: type,
+                                    region: region.name,
+                                    lat: lat,
+                                    lng: lng,
+                                    status: Math.random() > 0.25 ? 'online' : 'offline',
+                                    speed: Math.random() * 40 + 20,
+                                    heading: type === 'taxi' ? (Math.floor(Math.random() * 4) * 90) : (Math.random() * 360)
+                                };
+                                
+                                this.drivers.push(newDriver);
+                                
+                                if (driverIndex % 100 === 0) {
+                                    console.log(`${driverIndex}명 생성됨`);
+                                    this.updateDriverList();
+                                    this.updateDriverMarkers();
+                                }
                             }
-                        }, i * 10);
+                        }, i * 8);
                     }
                 });
+                
+                console.log('대전 지역 1000명 기사 시뮬레이션 시작');
             }
 
             generateVehicleNumber(region) {
@@ -2020,17 +2176,32 @@
                         const moveDistance = (driver.speed / 3600) * 3;
                         const earthRadius = 6371;
                         
+                        let newLat, newLng;
+                        
                         if (driver.type === 'taxi') {
-                            // 택시: 도로를 따라 움직이는 것처럼 더 제한적인 움직임
-                            // 방향 변경이 적고, 격자 패턴으로 움직임 (도로망 시뮬레이션)
                             const deltaLat = (moveDistance / earthRadius) * (180 / Math.PI) * Math.cos(driver.heading * Math.PI / 180) * 0.3;
                             const deltaLng = (moveDistance / earthRadius) * (180 / Math.PI) * Math.sin(driver.heading * Math.PI / 180) / Math.cos(driver.lat * Math.PI / 180) * 0.3;
                             
-                            driver.lat += deltaLat;
-                            driver.lng += deltaLng;
+                            newLat = driver.lat + deltaLat;
+                            newLng = driver.lng + deltaLng;
                             
-                            // 택시는 주로 직각으로 방향 전환 (도로 교차점)
-                            if (Math.random() < 0.02) {
+                            if (!this.isValidPosition(newLat, newLng)) {
+                                const possibleDirections = [0, 90, 180, 270].filter(dir => dir !== driver.heading);
+                                driver.heading = possibleDirections[Math.floor(Math.random() * possibleDirections.length)];
+                                
+                                const retryDeltaLat = (moveDistance / earthRadius) * (180 / Math.PI) * Math.cos(driver.heading * Math.PI / 180) * 0.3;
+                                const retryDeltaLng = (moveDistance / earthRadius) * (180 / Math.PI) * Math.sin(driver.heading * Math.PI / 180) / Math.cos(driver.lat * Math.PI / 180) * 0.3;
+                                
+                                newLat = driver.lat + retryDeltaLat;
+                                newLng = driver.lng + retryDeltaLng;
+                            }
+                            
+                            if (this.isValidPosition(newLat, newLng)) {
+                                driver.lat = newLat;
+                                driver.lng = newLng;
+                            }
+                            
+                            if (Math.random() < 0.03) {
                                 const possibleDirections = [0, 90, 180, 270];
                                 const currentDirection = Math.round(driver.heading / 90) * 90;
                                 const newDirections = possibleDirections.filter(dir => Math.abs(dir - currentDirection) === 90 || Math.abs(dir - currentDirection) === 270);
@@ -2039,41 +2210,47 @@
                                 }
                             }
                             
-                            // 속도 변화도 제한적 (신호등, 교통 상황)
                             driver.speed += (Math.random() - 0.5) * 5;
                             driver.speed = Math.max(15, Math.min(60, driver.speed));
                             
                         } else {
-                            // 배달기사: 강, 바다를 제외한 어느 곳이든 자유롭게 움직임
-                            // 더 자유로운 움직임 패턴
                             const deltaLat = (moveDistance / earthRadius) * (180 / Math.PI) * Math.cos(driver.heading * Math.PI / 180) * 0.8;
                             const deltaLng = (moveDistance / earthRadius) * (180 / Math.PI) * Math.sin(driver.heading * Math.PI / 180) / Math.cos(driver.lat * Math.PI / 180) * 0.8;
                             
-                            driver.lat += deltaLat;
-                            driver.lng += deltaLng;
+                            newLat = driver.lat + deltaLat;
+                            newLng = driver.lng + deltaLng;
                             
-                            // 배달기사는 자유로운 방향 전환 (건물 사이, 골목길, 공원 등)
+                            if (!this.isValidPosition(newLat, newLng)) {
+                                driver.heading = (driver.heading + 180 + (Math.random() - 0.5) * 90) % 360;
+                                if (driver.heading < 0) driver.heading += 360;
+                                
+                                const retryDeltaLat = (moveDistance / earthRadius) * (180 / Math.PI) * Math.cos(driver.heading * Math.PI / 180) * 0.8;
+                                const retryDeltaLng = (moveDistance / earthRadius) * (180 / Math.PI) * Math.sin(driver.heading * Math.PI / 180) / Math.cos(driver.lat * Math.PI / 180) * 0.8;
+                                
+                                newLat = driver.lat + retryDeltaLat;
+                                newLng = driver.lng + retryDeltaLng;
+                            }
+                            
+                            if (this.isValidPosition(newLat, newLng)) {
+                                driver.lat = newLat;
+                                driver.lng = newLng;
+                            }
+                            
                             if (Math.random() < 0.08) {
                                 driver.heading += (Math.random() - 0.5) * 180;
                                 driver.heading = driver.heading % 360;
                                 if (driver.heading < 0) driver.heading += 360;
                             }
                             
-                            // 속도 변화도 더 큼 (언덕, 계단, 엘리베이터 등)
                             driver.speed += (Math.random() - 0.5) * 15;
                             driver.speed = Math.max(5, Math.min(50, driver.speed));
                             
-                            // 간혹 완전히 멈춤 (건물 내 배달)
                             if (Math.random() < 0.01) {
                                 driver.speed = 0;
                             } else if (driver.speed === 0 && Math.random() < 0.3) {
                                 driver.speed = Math.random() * 20 + 10;
                             }
                         }
-                        
-                        // 한국 영역을 벗어나지 않도록 제한
-                        driver.lat = Math.max(33.0, Math.min(38.9, driver.lat));
-                        driver.lng = Math.max(125.0, Math.min(132.0, driver.lng));
                     }
                 });
                 
@@ -2615,31 +2792,77 @@
                         content: `실종자 ${person.name || '이름 미상'} 알림 전송 중...`
                     });
 
+                    let targetTokens = [];
+                    let message = '';
+                    
+                    if (notificationType === 'smart') {
+                        const driversInRange = await this.getDriversInRange(person.id);
+                        
+                        if (driversInRange.length === 0) {
+                            this.showToast('범위 내 온라인 기사가 없습니다.', 'error');
+                            return;
+                        }
+                        
+                        targetTokens = driversInRange.map(d => `token_${d.id}`);
+                        message = `[스마트 전송] ${person.name || '이름 미상'}님을 찾아주세요`;
+                        
+                        this.addActivity({
+                            time: new Date().toLocaleTimeString(),
+                            content: `범위 내 ${driversInRange.length}명의 기사에게 전송`
+                        });
+                    } else if (notificationType === 'test') {
+                        targetTokens = ['test_token'];
+                        message = `[테스트] ${person.name || '이름 미상'}님을 찾아주세요`;
+                    } else if (notificationType === 'all') {
+                        const onlineDrivers = this.drivers.filter(d => d.status === 'online');
+                        targetTokens = onlineDrivers.map(d => `token_${d.id}`);
+                        message = `[전체 전송] ${person.name || '이름 미상'}님을 찾아주세요`;
+                        
+                        if (targetTokens.length === 0) {
+                            this.showToast('온라인 기사가 없습니다.', 'error');
+                            return;
+                        }
+                    }
+
+                    const requestData = {
+                        person_id: person.id,
+                        message: message,
+                        priority: person.priority || 'MEDIUM',
+                        target_tokens: targetTokens,
+                        test_mode: notificationType === 'test'
+                    };
+
+                    console.log('전송 데이터:', requestData);
+
                     const response = await fetch(`${API_BASE_URL}/api/send_notification`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            person: person,
-                            target_tokens: ['test_token'],
-                            test_mode: notificationType === 'test'
-                        })
+                        body: JSON.stringify(requestData)
                     });
 
                     const result = await response.json();
 
                     if (response.ok) {
-                        this.showToast(`알림 전송 완료`, 'success');
+                        this.showToast(`알림 전송 완료 (${targetTokens.length}명)`, 'success');
                         this.showResult('알림 전송 결과', {
-                            person: person.name,
-                            category: person.category,
-                            search_radius: `${(this.getSearchRadius(person)/1000).toFixed(1)}km`,
-                            type: notificationType
+                            실종자: person.name || '이름 미상',
+                            카테고리: person.category || '미지정',
+                            수색반경: `${(this.getSearchRadius(person)/1000).toFixed(1)}km`,
+                            전송방식: notificationType === 'smart' ? '스마트 전송' : (notificationType === 'test' ? '테스트 전송' : '전체 전송'),
+                            대상기사수: targetTokens.length
+                        });
+                        
+                        this.addActivity({
+                            time: new Date().toLocaleTimeString(),
+                            content: `알림 전송 완료: ${person.name || '이름 미상'} (${targetTokens.length}명)`
                         });
                     } else {
-                        this.showToast(`전송 실패: ${result.detail}`, 'error');
+                        console.error('전송 실패:', result);
+                        this.showToast(`전송 실패: ${result.detail || JSON.stringify(result)}`, 'error');
                     }
 
                 } catch (error) {
+                    console.error('알림 전송 오류:', error);
                     this.showToast(`오류 발생: ${error.message}`, 'error');
                 }
             }
@@ -3151,6 +3374,243 @@
             
             console.log(`검색 결과: "${searchTerm}" - ${visibleCount}명 표시`);
         }
+
+        // 목격 신고 내역 로드
+        async function loadSightingReports(status = 'all') {
+            const container = document.getElementById('sightingReportsList');
+            if (!container) return;
+            
+            try {
+                const response = await fetch(`http://localhost:8001/api/sighting_reports?status=${status}`);
+                
+                if (!response.ok) {
+                    throw new Error('서버 오류');
+                }
+                
+                const data = await response.json();
+                
+                if (data.reports.length === 0) {
+                    container.innerHTML = '<div style="text-align: center; padding: 40px; color: #666;">목격 신고 내역이 없습니다</div>';
+                    return;
+                }
+                
+                container.innerHTML = data.reports.map(report => {
+                    const statusText = {
+                        'PENDING': '대기중',
+                        'REVIEWING': '검토중',
+                        'CONFIRMED': '확인됨 ✓',
+                        'REJECTED': '기각됨'
+                    }[report.status] || '대기중';
+                    
+                    const confidenceText = {
+                        'HIGH': '확실함',
+                        'MEDIUM': '보통',
+                        'LOW': '불확실함'
+                    }[report.confidence_level] || '보통';
+                    
+                    const photoHtml = report.person_photo 
+                        ? `<img src="data:image/jpeg;base64,${report.person_photo}" class="report-photo">`
+                        : `<div class="report-photo" style="display: flex; align-items: center; justify-content: center; background: #f3f4f6;"><i class="fas fa-user" style="color: #9ca3af;"></i></div>`;
+                    
+                    const reportTime = new Date(report.created_at).toLocaleString('ko-KR');
+                    
+                    return `
+                        <div class="report-card" style="${report.status === 'CONFIRMED' ? 'border: 2px solid #10b981;' : ''}">
+                            <div class="report-header">
+                                <div class="report-person-info">
+                                    ${photoHtml}
+                                    <div>
+                                        <div class="report-name">
+                                            ${report.person_name || '이름 미상'}
+                                            <span class="confidence-badge confidence-${report.confidence_level}">
+                                                ${confidenceText}
+                                            </span>
+                                        </div>
+                                        <div class="report-meta">#${report.id} | ${reportTime}</div>
+                                    </div>
+                                </div>
+                                <span class="report-status status-${report.status}">${statusText}</span>
+                            </div>
+                            
+                            <div class="report-content">
+                                <div style="margin-bottom: 6px;"><strong>위치:</strong> ${report.lat?.toFixed(6) || 'N/A'}, ${report.lng?.toFixed(6) || 'N/A'}</div>
+                                <div><strong>설명:</strong> ${report.description || '없음'}</div>
+                            </div>
+                            
+                            ${report.status === 'PENDING' ? `
+                                <div class="report-actions">
+                                    <button style="background: #6b7280;" onclick="updateReportStatus(${report.id}, 'REVIEWING')">
+                                        <i class="fas fa-search"></i> 검토중
+                                    </button>
+                                    <button style="background: #10b981;" onclick="confirmReport(${report.id}, '${report.person_name || '이름 미상'}')">
+                                        <i class="fas fa-check-circle"></i> 실종자 발견!
+                                    </button>
+                                    <button style="background: #ef4444;" onclick="updateReportStatus(${report.id}, 'REJECTED')">
+                                        <i class="fas fa-times"></i> 기각
+                                    </button>
+                                    <button style="background: #dc2626; margin-left: 8px;" onclick="deleteReport(${report.id})">
+                                        <i class="fas fa-trash"></i> 삭제
+                                    </button>
+                                </div>
+                            ` : `
+                                <div class="report-actions">
+                                    <button style="background: #dc2626;" onclick="deleteReport(${report.id})">
+                                        <i class="fas fa-trash"></i> 삭제
+                                    </button>
+                                </div>
+                            `}
+                        </div>
+                    `;
+                }).join('');
+                
+            } catch (error) {
+                console.error('오류:', error);
+                container.innerHTML = '<div style="text-align: center; padding: 40px; color: #ef4444;">불러오기 실패</div>';
+            }
+        }
+
+        async function confirmReport(reportId, personName) {
+            if (!confirm(`${personName}님을 발견했습니까?\n\n이 신고를 "확인됨"으로 처리하면 실종자가 "찾음" 상태로 변경됩니다.`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`http://localhost:8001/api/sighting_report/${reportId}/status?status=CONFIRMED`, {
+                    method: 'PATCH'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('업데이트 실패');
+                }
+                
+                const result = await response.json();
+                
+                if (result.person_found) {
+                    alert('실종자가 발견되었습니다!\n실종자 목록이 업데이트됩니다.');
+                    // 실종자 목록도 새로고침
+                    if (typeof loadMissingPersons === 'function') {
+                        loadMissingPersons();
+                    }
+                }
+                
+                loadSightingReports(document.getElementById('reportStatusFilter').value);
+            } catch (error) {
+                console.error('확인 처리 오류:', error);
+                alert('확인 처리에 실패했습니다');
+            }
+        }
+
+        async function updateReportStatus(reportId, status) {
+            try {
+                const response = await fetch(`http://localhost:8001/api/sighting_report/${reportId}/status?status=${status}`, {
+                    method: 'PATCH'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('업데이트 실패');
+                }
+                
+                loadSightingReports(document.getElementById('reportStatusFilter').value);
+            } catch (error) {
+                console.error('상태 업데이트 오류:', error);
+                alert('상태 업데이트에 실패했습니다');
+            }
+        }
+
+        async function deleteReport(reportId) {
+            if (!confirm('이 신고를 삭제하시겠습니까?')) {
+                return;
+            }
+            
+            try {
+                console.log('삭제 요청:', reportId);
+                
+                const response = await fetch(`http://localhost:8001/api/sighting_report/${reportId}`, {
+                    method: 'DELETE'
+                });
+                
+                console.log('응답 상태:', response.status);
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    console.error('삭제 실패:', errorData);
+                    throw new Error(errorData.detail || '삭제 실패');
+                }
+                
+                const result = await response.json();
+                console.log('삭제 성공:', result);
+                
+                alert('신고가 삭제되었습니다');
+                loadSightingReports(document.getElementById('reportStatusFilter').value);
+                
+            } catch (error) {
+                console.error('삭제 오류:', error);
+                alert(`삭제에 실패했습니다: ${error.message}`);
+            }
+        }
+
+        // WebSocket 연결
+        let reportWebSocket = null;
+        
+        function connectReportWebSocket() {
+            try {
+                reportWebSocket = new WebSocket('ws://localhost:8001/ws/admin');
+                
+                reportWebSocket.onopen = function() {
+                    console.log('목격 신고 WebSocket 연결됨');
+                };
+                
+                reportWebSocket.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    console.log('WebSocket 메시지 수신:', data);
+                    
+                    if (data.type === 'new_sighting_report') {
+                        // 알림 표시
+                        if (confirm(`새로운 목격 신고가 접수되었습니다!\n신고 ID: #${data.report_id}\n\n목격 신고 탭으로 이동하시겠습니까?`)) {
+                            switchTab('sighting');
+                            loadSightingReports();
+                        }
+                        
+                        // 신고 카운트 업데이트
+                        const reportCount = document.getElementById('reportCount');
+                        if (reportCount) {
+                            const currentCount = parseInt(reportCount.textContent) || 0;
+                            reportCount.textContent = currentCount + 1;
+                            reportCount.style.animation = 'pulse 1s ease-in-out 3';
+                        }
+                    }
+                };
+                
+                reportWebSocket.onerror = function(error) {
+                    console.error('WebSocket 오류:', error);
+                };
+                
+                reportWebSocket.onclose = function() {
+                    console.log('WebSocket 연결 종료. 5초 후 재연결...');
+                    setTimeout(connectReportWebSocket, 5000);
+                };
+            } catch (error) {
+                console.error('WebSocket 연결 실패:', error);
+            }
+        }
+        
+        // 페이지 로드 시 실행
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('대시보드 로딩 완료');
+            connectReportWebSocket();
+        });
+        
+        // switchTab 함수가 있다면 확장
+        const originalSwitchTab = window.switchTab;
+        if (originalSwitchTab) {
+            window.switchTab = function(tabName) {
+                originalSwitchTab(tabName);
+                if (tabName === 'sighting') {
+                    loadSightingReports();
+                }
+            };
+        }
+
     </script>
 </body>
 </html>

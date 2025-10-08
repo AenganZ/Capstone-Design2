@@ -20,7 +20,7 @@
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
     <application
-        android:label="실종자 신고"
+        android:label="대전시 실종자 신고"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">

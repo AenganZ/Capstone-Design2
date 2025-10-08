@@ -87,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: AppBar(
         title: const Text(
-          'AenganZ 실종자 신고',
+          '대전시 실종자 신고',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         elevation: 0,

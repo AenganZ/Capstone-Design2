@@ -5,7 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://localhost:8000';
+  static const String baseUrl = 'http://localhost:8001';
   static const Duration timeout = Duration(seconds: 30);
 
   static Future<bool> checkServerConnection() async {

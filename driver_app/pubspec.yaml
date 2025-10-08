@@ -1,0 +1,22 @@
+name: driver_app
+description: 대전 이동 안전망 - 기사용 앱
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.1.0
+  shared_preferences: ^2.2.2
+  intl: ^0.18.1
+  web_socket_channel: ^2.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
