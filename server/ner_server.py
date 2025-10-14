@@ -383,6 +383,8 @@ def process_base64_image(base64_string: str) -> str:
         return None
 
 def process_missing_person(raw_data: dict, ner_model: KPFBertNER) -> ProcessedPerson:
+    import hashlib
+    
     # etcSpfeatr을 주요 설명으로 사용
     description = raw_data.get("etcSpfeatr", "") or ""
     photo_base64 = raw_data.get("tknphotoFile", "") or ""
@@ -400,6 +402,10 @@ def process_missing_person(raw_data: dict, ner_model: KPFBertNER) -> ProcessedPe
     
     gender = raw_data.get("sexdstnDscd", "")
     
+    # 고유 ID 생성
+    unique_key = f"{name}_{age}_{gender}_{raw_data.get('occrde', '')}_{raw_data.get('occrAdres', '')}"
+    person_id = raw_data.get("msspsnIdntfccd") or hashlib.md5(unique_key.encode()).hexdigest()
+
     # etcSpfeatr이 있으면 NER 처리
     ner_entities = {}
     extracted_features = {
@@ -471,6 +477,9 @@ def process_missing_person(raw_data: dict, ner_model: KPFBertNER) -> ProcessedPe
     
     # 사진 처리
     photo_url = None
+    print(f"[디버그] 사진 데이터 길이: {len(photo_base64) if photo_base64 else 0}")  # 여기 추가
+    print(f"[디버그] 사진 데이터 시작 문자: {photo_base64[:20] if photo_base64 and len(photo_base64) > 20 else 'NONE'}")  # 여기 추가
+
     if photo_base64 and len(photo_base64) > 50:
         try:
             if photo_base64.startswith('data:'):
@@ -481,15 +490,18 @@ def process_missing_person(raw_data: dict, ner_model: KPFBertNER) -> ProcessedPe
                 photo_url = f"data:image/png;base64,{photo_base64}"
             else:
                 photo_url = f"data:image/jpeg;base64,{photo_base64}"
+            print(f"[디버그] photo_url 생성 성공: {len(photo_url) if photo_url else 0}자")  # 여기 추가
         except Exception as e:
             print(f"사진 처리 오류: {e}")
             photo_url = None
+    else:
+        print(f"[디버그] 사진 데이터 없음 또는 너무 짧음")
     
     # 최종 description 생성 (화면 표시용)
     final_description = description if description else f"{age}세 {gender}"
     
     return ProcessedPerson(
-        id=str(raw_data.get("msspsnIdntfccd", f"temp_{int(time.time())}")),
+        id=str(person_id),
         name=name,
         age=age,
         gender=gender,

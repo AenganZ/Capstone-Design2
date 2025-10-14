@@ -274,7 +274,7 @@ api_manager = OptimizedAPIManager()
 
 SAFE_URL = "https://www.safe182.go.kr/api/lcm/amberList.do"
 KAKAO_GEO = "https://dapi.kakao.com/v2/local/search/address.json"
-ITS_CCTV_URL = "https://www.its.go.kr/opendata/bizdata/safdriveInfoSvc"
+ITS_CCTV_URL = "https://openapi.its.go.kr:9443/cctvInfo"
 WEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
 
 async def check_ner_server():
@@ -687,7 +687,8 @@ async def send_to_ner_server(raw_data_list: List[Dict]) -> List[Dict]:
                 "faceshpeDscd": raw_data.get("faceshpeDscd", ""),
                 "hairshpeDscd": raw_data.get("hairshpeDscd", ""),
                 "haircolrDscd": raw_data.get("haircolrDscd", ""),
-                "tkphotolength": raw_data.get("tkphotolength", "")
+                "tkphotolength": raw_data.get("tkphotolength", ""),
+                "tknphotoFile": raw_data.get("tknphotoFile", "")
             }
             
             description_parts = []
@@ -711,7 +712,7 @@ async def send_to_ner_server(raw_data_list: List[Dict]) -> List[Dict]:
             start_time = time.time()
             response = await client.post(
                 f"{NER_SERVER_URL}/api/process_missing_persons",
-                json={"persons": enriched_data_list}
+                json={"raw_data_list": enriched_data_list}
             )
             response_time = time.time() - start_time
             
@@ -908,38 +909,49 @@ def original_for_log(original, cleaned):
         return original
     return f"{original} -> {cleaned}"
 
-async def fetch_cctv_data(lat: float, lng: float, radius: int = 1000):
+async def fetch_cctv_data(lat: float, lng: float, radius: int):
     if not ITS_CCTV_API_KEY:
         log_system_event("WARNING", "CCTV_API", "API 키가 설정되지 않았습니다")
         return []
     
+    delta = radius / 100000.0
+    
     async with httpx.AsyncClient() as client:
         params = {
             "apiKey": ITS_CCTV_API_KEY,
-            "type": "도로유형",
-            "cctvType": "실시간스트리밍",
-            "minX": lng - 0.01,
-            "maxX": lng + 0.01,
-            "minY": lat - 0.01,
-            "maxY": lat + 0.01,
+            "type": "its",
+            "cctvType": "1",
+            "minX": lng - delta,
+            "maxX": lng + delta,
+            "minY": lat - delta,
+            "maxY": lat + delta,
             "getType": "json"
         }
+        
+        print(f"CCTV API 요청: {params}")
         
         try:
             start_time = time.time()
             response = await client.get(ITS_CCTV_URL, params=params, timeout=30.0)
             response_time = time.time() - start_time
             
+            print(f"CCTV API 응답 코드: {response.status_code}")
+            
             if response.status_code == 200:
                 data = response.json()
-                result = data.get("data", [])
+                print(f"CCTV API 응답 데이터: {json.dumps(data, ensure_ascii=False)[:500]}")
+                result = data.get("response", {}).get("data", [])
+                print(f"CCTV 개수: {len(result)}")
                 await log_api_request("CCTV_API", "GET", len(result), True, response_time)
                 return result
             else:
+                error_text = response.text[:200]
+                print(f"CCTV API 오류 응답: {error_text}")
                 await log_api_request("CCTV_API", "GET", 0, False, response_time, f"HTTP {response.status_code}")
                 return []
                 
         except Exception as e:
+            print(f"CCTV API 예외: {e}")
             await log_api_request("CCTV_API", "GET", 0, False, 0, str(e))
             log_system_event("ERROR", "CCTV_API", f"요청 실패: {e}")
             return []
