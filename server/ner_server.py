@@ -536,7 +536,7 @@ async def process_missing_persons_endpoint(request: RawDataList):
         processed_persons = []
         for raw_data in request.raw_data_list:
             processed_person = process_missing_person(raw_data, ner_model)
-            processed_persons.append(processed_person.dict())
+            processed_persons.append(processed_person.model_dump())
         
         print(f"NER 서버: {len(processed_persons)}명의 데이터 처리 완료")
         return processed_persons

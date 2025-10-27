@@ -21,11 +21,15 @@ class _StatusScreenState extends State<StatusScreen> {
   }
 
   Future<void> _loadStatusData() async {
+    if (!mounted) return;
+    
     setState(() {
       _isLoading = true;
     });
 
     try {
+      print('=== 상태 데이터 로드 시작 ===');
+      
       final results = await Future.wait([
         ApiService.getServerStatus(),
         ApiService.getLocalReports(),
@@ -33,16 +37,47 @@ class _StatusScreenState extends State<StatusScreen> {
 
       final serverStatus = results[0] as Map<String, dynamic>;
       final localReports = results[1] as List<Map<String, dynamic>>;
+      
+      print('서버 상태: ${serverStatus['success']}');
+      print('로컬 신고 개수: ${localReports.length}');
+      
+      if (localReports.isNotEmpty) {
+        print('로컬 신고 내역:');
+        for (var report in localReports) {
+          print('  - ${report['name']} (${report['age']}세)');
+        }
+      } else {
+        print('로컬 신고 없음');
+      }
 
+      if (!mounted) return;
+      
       setState(() {
         _serverStatus = serverStatus;
         _localReports = localReports;
         _isLoading = false;
       });
-    } catch (e) {
+      
+      print('=== 상태 데이터 로드 완료 ===');
+    } catch (e, stackTrace) {
+      print('상태 데이터 로드 오류: $e');
+      print('스택 트레이스: $stackTrace');
+      
+      if (!mounted) return;
+      
       setState(() {
         _isLoading = false;
       });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('데이터를 불러오는 중 오류가 발생했습니다'),
+            backgroundColor: Color(0xFFEF4444),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
     }
   }
 
@@ -139,7 +174,6 @@ class _StatusScreenState extends State<StatusScreen> {
             if (isConnected && _serverStatus != null) ...[
               const SizedBox(height: 12),
               _buildStatusRow('상태', _serverStatus!['status'] ?? 'Unknown'),
-              _buildStatusRow('Firebase', _serverStatus!['firebase'] == true ? '연결됨' : '연결 안됨'),
               if (_serverStatus!['timestamp'] != null)
                 _buildStatusRow('마지막 업데이트', _formatTimestamp(_serverStatus!['timestamp'])),
             ],
@@ -172,11 +206,6 @@ class _StatusScreenState extends State<StatusScreen> {
                   ),
                 ),
                 const Spacer(),
-                if (_localReports.isNotEmpty)
-                  TextButton(
-                    onPressed: _retryFailedReports,
-                    child: const Text('재전송'),
-                  ),
               ],
             ),
             const SizedBox(height: 12),
@@ -203,28 +232,55 @@ class _StatusScreenState extends State<StatusScreen> {
                 ),
               )
             else
-              ...(_localReports.map((report) => Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFEF3C7),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.pending,
-                          color: Color(0xFFF59E0B),
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '${report['name']} (${report['age']}세)',
-                            style: const TextStyle(fontWeight: FontWeight.w500),
+              ...(_localReports.map((report) => InkWell(
+                    onTap: () => _showReportDetail(report),
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEF3C7),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.pending,
+                            color: Color(0xFFF59E0B),
+                            size: 20,
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${report['name']} (${report['age']}세, ${report['gender']})',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  report['location'] ?? '',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Color(0xFF6B7280),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(
+                            Icons.arrow_forward_ios,
+                            size: 16,
+                            color: Color(0xFFF59E0B),
+                          ),
+                        ],
+                      ),
                     ),
                   ))),
           ],
@@ -351,6 +407,196 @@ class _StatusScreenState extends State<StatusScreen> {
     }
   }
 
+  void _showReportDetail(Map<String, dynamic> report) async {
+    // 서버에서 최신 상태 확인
+    Map<String, dynamic>? serverStatus;
+    if (report['person_id'] != null) {
+      try {
+        final statusResult = await ApiService.checkReportStatus(report['person_id']);
+        if (statusResult['success']) {
+          serverStatus = statusResult;
+        }
+      } catch (e) {
+        print('상태 확인 오류: $e');
+      }
+    }
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.person, color: Color(0xFF1E40AF)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '${report['name']}님 신고 내역',
+                style: const TextStyle(fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 서버 상태 표시
+              if (serverStatus != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: serverStatus['status'] == 'APPROVED'
+                        ? const Color(0xFF10B981).withOpacity(0.1)
+                        : serverStatus['status'] == 'REJECTED'
+                            ? const Color(0xFFEF4444).withOpacity(0.1)
+                            : const Color(0xFFF59E0B).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            serverStatus['status'] == 'APPROVED'
+                                ? Icons.check_circle
+                                : serverStatus['status'] == 'REJECTED'
+                                    ? Icons.cancel
+                                    : Icons.pending,
+                            color: serverStatus['status'] == 'APPROVED'
+                                ? const Color(0xFF10B981)
+                                : serverStatus['status'] == 'REJECTED'
+                                    ? const Color(0xFFEF4444)
+                                    : const Color(0xFFF59E0B),
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            serverStatus['status'] == 'APPROVED'
+                                ? '승인됨'
+                                : serverStatus['status'] == 'REJECTED'
+                                    ? '거절됨'
+                                    : '검토 대기 중',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: serverStatus['status'] == 'APPROVED'
+                                  ? const Color(0xFF10B981)
+                                  : serverStatus['status'] == 'REJECTED'
+                                      ? const Color(0xFFEF4444)
+                                      : const Color(0xFFF59E0B),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (serverStatus['status'] == 'REJECTED' && 
+                          serverStatus['rejection_reason'] != null) ...[
+                        const SizedBox(height: 8),
+                        const Text(
+                          '거절 사유:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          serverStatus['rejection_reason'],
+                          style: const TextStyle(
+                            color: Color(0xFFEF4444),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              
+              _buildDetailRow('이름', report['name']),
+              _buildDetailRow('나이', '${report['age']}세'),
+              _buildDetailRow('성별', report['gender']),
+              _buildDetailRow('실종 장소', report['location']),
+              _buildDetailRow('실종 일시', _formatDateTime(report['missing_datetime'])),
+              const Divider(height: 24),
+              _buildDetailRow('신고자', report['reporter_name']),
+              _buildDetailRow('연락처', report['reporter_phone']),
+              _buildDetailRow('관계', report['reporter_relation']),
+              if (report['description'] != null && report['description'].isNotEmpty) ...[
+                const Divider(height: 24),
+                const Text(
+                  '상세 설명',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF374151),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  report['description'],
+                  style: const TextStyle(color: Color(0xFF6B7280)),
+                ),
+              ],
+              const Divider(height: 24),
+              _buildDetailRow('신고 번호', report['person_id']?.substring(0, 8) ?? 'N/A'),
+              _buildDetailRow('신고 일시', _formatDateTime(report['created_at'])),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('닫기'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Color(0xFF6B7280),
+                fontSize: 14,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontWeight: FontWeight.w500,
+                color: Color(0xFF1F2937),
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDateTime(String? datetime) {
+    if (datetime == null) return 'N/A';
+    try {
+      final dt = DateTime.parse(datetime);
+      return '${dt.year}년 ${dt.month}월 ${dt.day}일 ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (e) {
+      return datetime;
+    }
+  }
+
   Future<void> _testConnection() async {
     final result = await ApiService.testConnection();
     if (mounted) {
@@ -360,61 +606,6 @@ class _StatusScreenState extends State<StatusScreen> {
           backgroundColor: result ? const Color(0xFF10B981) : const Color(0xFFEF4444),
         ),
       );
-    }
-  }
-
-  Future<void> _retryFailedReports() async {
-    try {
-      final localReports = await ApiService.getLocalReports();
-      int successCount = 0;
-      int failCount = 0;
-
-      for (var report in localReports) {
-        try {
-          final result = await ApiService.submitMissingPerson(
-            name: report['name'],
-            age: report['age'],
-            gender: report['gender'],
-            missingLocation: report['location'],
-            missingDateTime: DateTime.parse(report['missing_datetime']),
-            reporterName: report['reporter_name'],
-            reporterPhone: report['reporter_phone'],
-            reporterRelation: report['reporter_relation'],
-            description: report['description'],
-          );
-
-          if (result['success']) {
-            successCount++;
-          } else {
-            failCount++;
-          }
-        } catch (e) {
-          failCount++;
-        }
-      }
-
-      if (successCount > 0) {
-        await ApiService.clearLocalReports();
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$successCount개 신고 전송 성공, $failCount개 실패'),
-            backgroundColor: successCount > 0 ? const Color(0xFF10B981) : const Color(0xFFEF4444),
-          ),
-        );
-        _loadStatusData();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('재전송 중 오류가 발생했습니다'),
-            backgroundColor: Color(0xFFEF4444),
-          ),
-        );
-      }
     }
   }
 
@@ -431,6 +622,7 @@ class _StatusScreenState extends State<StatusScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('삭제'),
           ),
         ],
@@ -438,15 +630,27 @@ class _StatusScreenState extends State<StatusScreen> {
     );
 
     if (confirmed == true) {
-      await ApiService.clearLocalReports();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('로컬 데이터가 삭제되었습니다'),
-            backgroundColor: Color(0xFF10B981),
-          ),
-        );
-        _loadStatusData();
+      try {
+        await ApiService.clearLocalReports();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('로컬 데이터가 삭제되었습니다'),
+              backgroundColor: Color(0xFF10B981),
+            ),
+          );
+          await _loadStatusData();
+        }
+      } catch (e) {
+        print('로컬 데이터 삭제 오류: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('데이터 삭제 중 오류가 발생했습니다'),
+              backgroundColor: Color(0xFFEF4444),
+            ),
+          );
+        }
       }
     }
   }
@@ -470,7 +674,7 @@ class _StatusScreenState extends State<StatusScreen> {
             Text('실종자 신고 및 관리 플랫폼'),
             SizedBox(height: 8),
             Text(
-              '개발: AenganZ 팀',
+              '개발: 레드성준 팀',
               style: TextStyle(color: Color(0xFF6B7280)),
             ),
           ],

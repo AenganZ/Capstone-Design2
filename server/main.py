@@ -1327,6 +1327,14 @@ async def create_missing_person(request: Dict[str, Any] = Body(...)):
         missing_person_data = request.get("missing_person", {})
         photo_data = request.get("photo_data")
         
+        # photo_data 처리 개선
+        if photo_data:
+            if not photo_data.startswith('data:'):
+                photo_data = f"data:image/jpeg;base64,{photo_data}"
+            print(f"사진 데이터 길이: {len(photo_data)}자")
+        else:
+            print("사진 데이터 없음")
+
         person_id = str(uuid.uuid4())
         current_time = datetime.now().isoformat()
         
@@ -1388,7 +1396,7 @@ async def create_missing_person(request: Dict[str, Any] = Body(...)):
         
         await manager.broadcast({
             "type": "new_report_pending",
-            "person": missing_person.dict()
+            "person": missing_person.model_dump()
         })
         
         return {
@@ -1530,52 +1538,33 @@ async def get_person_detail(person_id: str):
             SELECT id, name, age, gender, location, description, photo_url, photo_base64,
                    priority, risk_factors, ner_entities, extracted_features, lat, lng,
                    created_at, updated_at, status, category, source, confidence_score,
-                   last_seen, clothing_description, medical_condition, emergency_contact
+                   last_seen, clothing_description, medical_condition, emergency_contact,
+                   approval_status, rejection_reason
             FROM missing_persons WHERE id = ?
         ''', (person_id,))
         
         row = cursor.fetchone()
         
         if not row:
+            conn.close()
             raise HTTPException(status_code=404, detail="실종자를 찾을 수 없습니다")
         
-        columns = [desc[0] for desc in cursor.description]
-        person_dict = dict(zip(columns, row))
+        columns = [description[0] for description in cursor.description]
+        person = dict(zip(columns, row))
         
         try:
-            person_dict['risk_factors'] = json.loads(person_dict.get('risk_factors') or '[]')
-            person_dict['ner_entities'] = json.loads(person_dict.get('ner_entities') or '{}')
-            person_dict['extracted_features'] = json.loads(person_dict.get('extracted_features') or '{}')
-        except json.JSONDecodeError:
-            person_dict['risk_factors'] = []
-            person_dict['ner_entities'] = {}
-            person_dict['extracted_features'] = {}
-        
-        cursor.execute('SELECT COUNT(*) FROM sighting_reports WHERE person_id = ?', (person_id,))
-        person_dict['sighting_count'] = cursor.fetchone()[0]
-        
-        cursor.execute('''
-            SELECT reporter_lat, reporter_lng, description, confidence_level, reported_at 
-            FROM sighting_reports WHERE person_id = ? ORDER BY reported_at DESC LIMIT 5
-        ''', (person_id,))
-        
-        sightings = []
-        for sighting_row in cursor.fetchall():
-            sightings.append({
-                "lat": sighting_row[0],
-                "lng": sighting_row[1],
-                "description": sighting_row[2],
-                "confidence": sighting_row[3],
-                "reported_at": sighting_row[4]
-            })
-        
-        person_dict['recent_sightings'] = sightings
+            person['risk_factors'] = json.loads(person.get('risk_factors') or '[]')
+            person['ner_entities'] = json.loads(person.get('ner_entities') or '{}')
+            person['extracted_features'] = json.loads(person.get('extracted_features') or '{}')
+        except:
+            pass
         
         conn.close()
-        return person_dict
         
-    except HTTPException:
-        raise
+        print(f"API 응답: approval_status={person.get('approval_status')}, rejection_reason={person.get('rejection_reason')}")  # 디버깅 로그
+        
+        return person
+        
     except Exception as e:
         log_system_event("ERROR", "API", f"실종자 상세 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -2166,13 +2155,18 @@ async def reject_missing_person(person_id: str, reason: str = Body(None)):
         conn = sqlite3.connect('missing_persons.db')
         cursor = conn.cursor()
         
+        print(f"거절 처리: person_id={person_id}, reason={reason}")  # 디버깅 로그
+        
         cursor.execute('''
             UPDATE missing_persons 
             SET approval_status = 'REJECTED',
+                rejection_reason = ?,
                 status = 'INACTIVE',
                 updated_at = ?
             WHERE id = ? AND source = 'REPORTER'
-        ''', (datetime.now().isoformat(), person_id))
+        ''', (reason, datetime.now().isoformat(), person_id))
+        
+        print(f"업데이트된 행 수: {cursor.rowcount}")  # 디버깅 로그
         
         if cursor.rowcount == 0:
             conn.close()

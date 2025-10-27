@@ -38,8 +38,21 @@ class ApiService {
       String? photoBase64;
       
       if (photo != null) {
-        final bytes = await photo.readAsBytes();
-        photoBase64 = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+        try {
+          print('사진 인코딩 시작: ${photo.name}');
+          final bytes = await photo.readAsBytes();
+          
+          if (bytes.isEmpty) {
+            print('에러: 사진 파일이 비어있습니다');
+            throw Exception('사진 파일이 비어있습니다.');
+          }
+          
+          photoBase64 = base64Encode(bytes);
+          print('사진 인코딩 성공: ${photoBase64.length}자');
+        } catch (e) {
+          print('사진 읽기 오류: $e');
+          throw Exception('사진 파일을 읽을 수 없습니다: ${e.toString()}');
+        }
       }
 
       final missingPerson = {
@@ -237,6 +250,35 @@ class ApiService {
         };
       }
     } catch (e) {
+      return {
+        'success': false,
+        'message': '서버에 연결할 수 없습니다.',
+      };
+    }
+  }
+
+  static Future<Map<String, dynamic>> checkReportStatus(String personId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/person/$personId'),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(timeout);
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return {
+          'success': true,
+          'status': data['approval_status'] ?? 'UNKNOWN',
+          'rejection_reason': data['rejection_reason'],
+        };
+      } else {
+        return {
+          'success': false,
+          'message': '신고 상태를 확인할 수 없습니다.',
+        };
+      }
+    } catch (e) {
+      print('신고 상태 확인 오류: $e');
       return {
         'success': false,
         'message': '서버에 연결할 수 없습니다.',

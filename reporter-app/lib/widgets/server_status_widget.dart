@@ -242,13 +242,6 @@ class _ServerStatusWidgetState extends State<ServerStatusWidget> {
               ),
               const SizedBox(height: 8),
               _buildInfoRow('상태', _serverStatus!['status'] ?? 'Unknown'),
-              _buildInfoRow(
-                'Firebase', 
-                _serverStatus!['firebase'] == true ? '연결됨' : '연결 안됨',
-                valueColor: _serverStatus!['firebase'] == true 
-                    ? const Color(0xFF10B981) 
-                    : const Color(0xFFEF4444),
-              ),
               if (_serverStatus!['timestamp'] != null)
                 _buildInfoRow(
                   '서버 시간', 

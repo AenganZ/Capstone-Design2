@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
+import 'dart:typed_data';
 
 class PhotoSelectorWidget extends StatefulWidget {
   final Function(XFile?) onPhotoSelected;
@@ -75,33 +75,47 @@ class _PhotoSelectorWidgetState extends State<PhotoSelectorWidget> {
         borderRadius: BorderRadius.circular(8),
         child: Stack(
           children: [
-            Image.file(
-              File(widget.selectedPhoto!.path),
-              width: double.infinity,
-              height: 200,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) {
-                return Container(
-                  height: 200,
-                  color: const Color(0xFFF3F4F6),
-                  child: const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 48,
-                          color: Color(0xFF6B7280),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          '이미지를 불러올 수 없습니다',
-                          style: TextStyle(color: Color(0xFF6B7280)),
-                        ),
-                      ],
+            FutureBuilder<Uint8List>(
+              future: widget.selectedPhoto!.readAsBytes(),
+              builder: (context, snapshot) {
+                if (snapshot.hasData) {
+                  return Image.memory(
+                    snapshot.data!,
+                    width: double.infinity,
+                    height: 200,
+                    fit: BoxFit.cover,
+                  );
+                } else if (snapshot.hasError) {
+                  return Container(
+                    height: 200,
+                    color: const Color(0xFFF3F4F6),
+                    child: const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.error_outline,
+                            size: 48,
+                            color: Color(0xFF6B7280),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            '이미지를 불러올 수 없습니다',
+                            style: TextStyle(color: Color(0xFF6B7280)),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
+                  );
+                } else {
+                  return Container(
+                    height: 200,
+                    color: const Color(0xFFF3F4F6),
+                    child: const Center(
+                      child: CircularProgressIndicator(),
+                    ),
+                  );
+                }
               },
             ),
             Positioned(
@@ -202,14 +216,25 @@ class _PhotoSelectorWidgetState extends State<PhotoSelectorWidget> {
     try {
       final XFile? pickedFile = await _picker.pickImage(
         source: source,
-        maxWidth: 1920,
-        maxHeight: 1080,
+        maxWidth: 400,
+        maxHeight: 400,
         imageQuality: 85,
       );
 
       if (pickedFile != null) {
-        final file = File(pickedFile.path);
-        final fileSize = await file.length();
+        print('선택된 사진: ${pickedFile.name}');
+        
+        // 웹에서도 작동하도록 XFile의 메서드 직접 사용
+        final fileSize = await pickedFile.length();
+        print('파일 크기: $fileSize bytes');
+        
+        if (fileSize == 0) {
+          print('에러: 파일이 비어있음');
+          if (mounted) {
+            _showErrorDialog('파일이 비어있습니다. 다른 사진을 선택해주세요.');
+          }
+          return;
+        }
         
         if (fileSize > 10 * 1024 * 1024) {
           if (mounted) {
@@ -218,11 +243,32 @@ class _PhotoSelectorWidgetState extends State<PhotoSelectorWidget> {
           return;
         }
 
+        // 파일을 읽을 수 있는지 테스트
+        try {
+          final bytes = await pickedFile.readAsBytes();
+          if (bytes.isEmpty) {
+            throw Exception('파일 데이터가 비어있습니다');
+          }
+          print('파일 읽기 성공: ${bytes.length} bytes');
+        } catch (e) {
+          print('파일 읽기 실패: $e');
+          if (mounted) {
+            _showErrorDialog('파일을 읽을 수 없습니다: ${e.toString()}');
+          }
+          return;
+        }
+
+        print('사진 선택 성공!');
         widget.onPhotoSelected(pickedFile);
+      } else {
+        print('사진 선택 취소됨');
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      print('=== 사진 선택 오류 ===');
+      print('오류: $e');
+      print('스택 트레이스: $stackTrace');
       if (mounted) {
-        _showErrorDialog('사진을 불러오는 중 오류가 발생했습니다.');
+        _showErrorDialog('사진을 불러오는 중 오류가 발생했습니다.\n${e.toString()}');
       }
     } finally {
       if (mounted) {

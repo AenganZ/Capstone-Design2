@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
-import 'dart:io';
+import 'dart:convert';
 import '../services/api_service.dart';
 import '../widgets/photo_selector_widget.dart';
 
@@ -903,6 +903,37 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
 
       if (mounted) {
         if (result['success']) {
+          // 사진 base64 인코딩해서 로컬에 저장
+          String? photoBase64;
+          if (_selectedPhoto != null) {
+            try {
+              final bytes = await _selectedPhoto!.readAsBytes();
+              photoBase64 = base64Encode(bytes);
+              print('로컬 저장용 사진 인코딩: ${photoBase64.length}자');
+            } catch (e) {
+              print('사진 인코딩 오류: $e');
+            }
+          }
+
+          final reportData = {
+            'person_id': result['person_id'],
+            'name': _nameController.text,
+            'age': int.parse(_ageController.text),
+            'gender': _selectedGender!,
+            'location': _missingLocationController.text,
+            'missing_datetime': _missingDateTime!.toIso8601String(),
+            'reporter_name': _reporterNameController.text,
+            'reporter_phone': _reporterPhoneController.text,
+            'reporter_relation': _selectedRelation!,
+            'description': _descriptionController.text,
+            'photo_base64': photoBase64,  // 사진 추가
+            'created_at': DateTime.now().toIso8601String(),
+            'status': 'submitted',
+          };
+          
+          await ApiService.saveReportLocally(reportData);
+          print('로컬에 신고 내역 저장 완료');
+          
           _showSuccessDialog(result['person_id']);
         } else {
           _showErrorDialog(result['message']);
