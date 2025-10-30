@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator
 from dotenv import load_dotenv
+from image_generator import get_generator
 
 load_dotenv()
 
@@ -2129,14 +2130,60 @@ async def approve_missing_person(person_id: str):
         
         conn.commit()
         
-        # 승인된 실종자 정보 조회
         cursor.execute('SELECT * FROM missing_persons WHERE id = ?', (person_id,))
         person = cursor.fetchone()
         conn.close()
         
+        if person and person[7]:
+            try:
+                print(f"SDXL 이미지 생성 시작: {person_id}")
+                
+                generator = get_generator()
+                
+                clean_base64 = person[7]
+                if clean_base64.startswith('data:'):
+                    clean_base64 = clean_base64.split(',')[1]
+                
+                clothing_description = person[5] or "일반적인 옷차림"
+                age = person[2] or 30
+                gender = person[3] or "남자"
+                
+                generated_base64 = generator.generate_missing_person_image(
+                    original_photo_base64=clean_base64,
+                    description=clothing_description,
+                    age=age,
+                    gender=gender
+                )
+                
+                if generated_base64:
+                    # 검증 추가
+                    if generated_base64 and generated_base64.startswith('/9j/'):
+                        print(f"올바른 이미지 생성, DB 업데이트")
+                        
+                        conn = sqlite3.connect('missing_persons.db')
+                        cursor = conn.cursor()
+                        cursor.execute('''
+                            UPDATE missing_persons 
+                            SET photo_base64 = ?, updated_at = ?
+                            WHERE id = ?
+                        ''', (generated_base64, datetime.now().isoformat(), person_id))
+                        conn.commit()
+                        conn.close()
+                        
+                        log_system_event("INFO", "IMAGE_GEN", f"SDXL 이미지 생성 완료: {person_id}")
+                    else:
+                        print(f"생성된 base64가 비정상적, 원본 유지")
+                        print(f"시작 문자: {generated_base64[:50] if generated_base64 else 'None'}")
+                else:
+                    print(f"이미지 생성 실패, 원본 사용")
+                    
+            except Exception as e:
+                print(f"이미지 생성 프로세스 오류: {e}")
+                import traceback
+                traceback.print_exc()
+        
         log_system_event("INFO", "APPROVAL", f"실종자 승인: {person_id}")
         
-        # 웹소켓으로 업데이트 알림
         await manager.broadcast({
             "type": "person_approved",
             "person_id": person_id

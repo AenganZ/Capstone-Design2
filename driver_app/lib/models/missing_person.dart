@@ -52,7 +52,7 @@ class MissingPerson {
       location: json['location'],
       description: json['description'],
       photoUrl: json['photo_url'],
-      photoBase64: json['photo_base64'],
+      photoBase64: _cleanPhotoBase64(json['photo_base64'] as String?),
       priority: json['priority'] ?? 'MEDIUM',
       riskFactors: json['risk_factors'] != null 
           ? List<String>.from(json['risk_factors'])
@@ -85,5 +85,24 @@ class MissingPerson {
 
   String getCategoryText() {
     return category ?? '미분류';
+  }
+
+  static String? _cleanPhotoBase64(String? base64String) {
+    if (base64String == null || base64String.isEmpty) return null;
+    
+    String cleaned = base64String.trim();
+    
+    if (cleaned.startsWith('data:image')) {
+      final parts = cleaned.split(',');
+      if (parts.length > 1) {
+        cleaned = parts[1];
+      }
+    }
+    
+    cleaned = cleaned
+        .replaceAll(RegExp(r'\s+'), '')
+        .replaceAll(RegExp(r'[^A-Za-z0-9+/=]'), '');
+    
+    return cleaned.isEmpty ? null : cleaned;
   }
 }

@@ -92,28 +92,31 @@ class MissingPersonCard extends StatelessWidget {
   Widget _buildPhoto() {
     if (person.photoBase64 != null && person.photoBase64!.isNotEmpty) {
       try {
-        String cleanBase64 = person.photoBase64!
-            .replaceAll(RegExp(r'\s+'), '')
-            .replaceAll(RegExp(r'[^A-Za-z0-9+/=]'), '');
+        final bytes = base64Decode(person.photoBase64!);
         
-        if (cleanBase64.isEmpty) {
-          return _buildPlaceholderPhoto();
-        }
-        
-        final bytes = base64Decode(cleanBase64);
         return Container(
           width: 80,
           height: 80,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(8),
-            image: DecorationImage(
-              image: MemoryImage(bytes),
+            color: const Color(0xFFE5E7EB),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.memory(
+              bytes,
               fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                print('카드 이미지 로딩 실패: $error');
+                return _buildPlaceholderPhoto();
+              },
             ),
           ),
         );
       } catch (e) {
-        print('이미지 디코딩 오류: $e');
+        print('카드 이미지 디코딩 오류: ${e.toString()}');
+        print('Base64 길이: ${person.photoBase64!.length}');
+        print('Base64 시작: ${person.photoBase64!.substring(0, person.photoBase64!.length > 50 ? 50 : person.photoBase64!.length)}');
         return _buildPlaceholderPhoto();
       }
     }

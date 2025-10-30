@@ -7,3 +7,10 @@ python-dotenv
 pydantic
 firebase-admin
 websockets
+opencv-python
+torch
+diffusers
+transformers
+accelerate
+controlnet-aux
+mediapipe

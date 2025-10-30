@@ -70,37 +70,29 @@ class _MissingPersonDetailScreenState extends State<MissingPersonDetailScreen> {
   }
 
   Widget _buildSafeImage() {
-  try {
-    String cleanBase64 = widget.person.photoBase64!
-        .replaceAll(RegExp(r'\s+'), '')
-        .replaceAll(RegExp(r'[^A-Za-z0-9+/=]'), '');
-    
-    if (cleanBase64.isEmpty) {
-      return const Center(
-        child: Icon(
-          Icons.person,
-          size: 100,
-          color: Colors.white54,
-        ),
+    try {
+      if (widget.person.photoBase64 == null || widget.person.photoBase64!.isEmpty) {
+        return _buildPlaceholderIcon();
+      }
+      
+      final bytes = base64Decode(widget.person.photoBase64!);
+      
+      return Image.memory(
+        bytes,
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) {
+          print('상세화면 이미지 로딩 실패: $error');
+          return _buildPlaceholderIcon();
+        },
       );
+    } catch (e) {
+      print('상세화면 이미지 디코딩 오류: ${e.toString()}');
+      print('Base64 길이: ${widget.person.photoBase64?.length ?? 0}');
+      return _buildPlaceholderIcon();
     }
-    
-    final bytes = base64Decode(cleanBase64);
-    return Image.memory(
-      bytes,
-      fit: BoxFit.contain,
-      errorBuilder: (context, error, stackTrace) {
-        return const Center(
-          child: Icon(
-            Icons.person,
-            size: 100,
-            color: Colors.white54,
-          ),
-        );
-      },
-    );
-  } catch (e) {
-    print('이미지 로딩 오류: $e');
+  }
+
+  Widget _buildPlaceholderIcon() {
     return const Center(
       child: Icon(
         Icons.person,
@@ -109,7 +101,6 @@ class _MissingPersonDetailScreenState extends State<MissingPersonDetailScreen> {
       ),
     );
   }
-}
 
   Widget _buildBasicInfoSection() {
     return Container(

@@ -103,43 +103,34 @@ class MissingPersonAlertDialog extends StatelessWidget {
 
   Widget _buildSafeImage() {
     try {
-      String cleanBase64 = person.photoBase64!
-          .replaceAll(RegExp(r'\s+'), '')
-          .replaceAll(RegExp(r'[^A-Za-z0-9+/=]'), '');
-      
-      if (cleanBase64.isEmpty) {
-        return const Center(
-          child: Icon(
-            Icons.person,
-            size: 100,
-            color: Colors.white54,
-          ),
-        );
+      if (person.photoBase64 == null || person.photoBase64!.isEmpty) {
+        return _buildPlaceholderIcon();
       }
       
-      final bytes = base64Decode(cleanBase64);
+      final bytes = base64Decode(person.photoBase64!);
+      
       return Image.memory(
         bytes,
         fit: BoxFit.contain,
         errorBuilder: (context, error, stackTrace) {
-          return const Center(
-            child: Icon(
-              Icons.person,
-              size: 100,
-              color: Colors.white54,
-            ),
-          );
+          print('다이얼로그 이미지 로딩 실패: $error');
+          return _buildPlaceholderIcon();
         },
       );
     } catch (e) {
-      return const Center(
-        child: Icon(
-          Icons.person,
-          size: 100,
-          color: Colors.white54,
-        ),
-      );
+      print('다이얼로그 이미지 디코딩 오류: ${e.toString()}');
+      return _buildPlaceholderIcon();
     }
+  }
+
+  Widget _buildPlaceholderIcon() {
+    return const Center(
+      child: Icon(
+        Icons.person,
+        size: 100,
+        color: Colors.white54,
+      ),
+    );
   }
 
   Widget _buildBasicInfoSection() {
