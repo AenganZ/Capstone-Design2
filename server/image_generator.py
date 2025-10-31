@@ -5,41 +5,170 @@ import torch
 import cv2
 import numpy as np
 import requests
-from PIL import Image, ImageDraw
-from diffusers import StableDiffusionXLInpaintPipeline, AutoencoderKL
-import mediapipe as mp
+from PIL import Image
+from diffusers import StableDiffusionXLPipeline, EulerDiscreteScheduler
+from insightface.app import FaceAnalysis
+from huggingface_hub import hf_hub_download
+import insightface
+from compel import Compel, ReturnedEmbeddingsType
 
 class MissingPersonImageGenerator:
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"이미지 생성 디바이스: {self.device}")
         
-        self.inpaint_pipeline = None
-        self.face_detection = None
+        self.sdxl_pipeline = None
+        self.face_analyzer = None
+        self.face_swapper = None
+        self.compel = None
         
     def initialize_models(self):
         try:
-            print("SDXL Inpaint 파이프라인 로딩 중...")
+            print("=== Face Swap + Compel 모델 초기화 시작 ===")
             
-            self.inpaint_pipeline = StableDiffusionXLInpaintPipeline.from_pretrained(
-                "diffusers/stable-diffusion-xl-1.0-inpainting-0.1",
-                torch_dtype=torch.float16
+            # 1. InsightFace
+            print("1. InsightFace 초기화 중...")
+            self.face_analyzer = FaceAnalysis(
+                name='buffalo_l',
+                providers=['CPUExecutionProvider']
+            )
+            self.face_analyzer.prepare(ctx_id=0, det_size=(640, 640))
+            print("✅ InsightFace 로딩 완료")
+            
+            # 2. Face Swapper
+            print("2. Face Swapper 모델 다운로드 중...")
+            try:
+                swapper_model_path = hf_hub_download(
+                    repo_id="deepinsight/inswapper",
+                    filename="inswapper_128.onnx",
+                    repo_type="model"
+                )
+                self.face_swapper = insightface.model_zoo.get_model(swapper_model_path)
+                print("✅ Face Swapper 로딩 완료")
+            except Exception as e:
+                print(f"⚠️ Face Swapper 로딩 실패: {e}")
+                swapper_path = "./models/inswapper_128.onnx"
+                if os.path.exists(swapper_path):
+                    self.face_swapper = insightface.model_zoo.get_model(swapper_path)
+                    print("✅ 로컬 Face Swapper 사용")
+            
+            # 3. SDXL 파이프라인
+            print("3. SDXL 파이프라인 로딩 중...")
+            self.sdxl_pipeline = StableDiffusionXLPipeline.from_pretrained(
+                "stabilityai/stable-diffusion-xl-base-1.0",
+                torch_dtype=torch.float16,
+                variant="fp16"
             ).to(self.device)
             
-            self.inpaint_pipeline.enable_model_cpu_offload()
-            
-            print("Face Detection 초기화 중...")
-            self.face_detection = mp.solutions.face_detection.FaceDetection(
-                model_selection=1,
-                min_detection_confidence=0.5
+            self.sdxl_pipeline.scheduler = EulerDiscreteScheduler.from_config(
+                self.sdxl_pipeline.scheduler.config
             )
             
-            print("모델 로딩 완료")
+            print("✅ SDXL 파이프라인 로딩 완료")
+            
+            # 4. Compel 초기화
+            print("4. Compel 초기화 중 (긴 프롬프트 지원)...")
+            self.compel = Compel(
+                tokenizer=[self.sdxl_pipeline.tokenizer, self.sdxl_pipeline.tokenizer_2],
+                text_encoder=[self.sdxl_pipeline.text_encoder, self.sdxl_pipeline.text_encoder_2],
+                returned_embeddings_type=ReturnedEmbeddingsType.PENULTIMATE_HIDDEN_STATES_NON_NORMALIZED,
+                requires_pooled=[False, True]
+            )
+            print("✅ Compel 초기화 완료!")
+            
+            print("=== 모든 모델 로딩 완료 ===")
             return True
             
         except Exception as e:
             print(f"모델 초기화 오류: {e}")
+            import traceback
+            traceback.print_exc()
             return False
+    
+    def extract_source_face(self, image: Image.Image):
+        try:
+            image_np = np.array(image)
+            image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
+            
+            faces = self.face_analyzer.get(image_bgr)
+            
+            if not faces or len(faces) == 0:
+                print("⚠️ 얼굴 감지 실패")
+                return None
+            
+            face = faces[0]
+            
+            print(f"✅ 원본 얼굴 추출 성공")
+            print(f"   - 신뢰도: {face.det_score:.2f}")
+            
+            return face
+            
+        except Exception as e:
+            print(f"얼굴 추출 오류: {e}")
+            return None
+    
+    def align_face_angle(self, face_kps):
+        try:
+            left_eye = face_kps[0]
+            right_eye = face_kps[1]
+            
+            delta_y = right_eye[1] - left_eye[1]
+            delta_x = right_eye[0] - left_eye[0]
+            angle = np.degrees(np.arctan2(delta_y, delta_x))
+            
+            return angle
+            
+        except Exception as e:
+            return 0
+    
+    def swap_face_with_alignment(self, target_image: Image.Image, source_face):
+        try:
+            if not self.face_swapper:
+                print("❌ Face Swapper 없음")
+                return target_image
+            
+            target_np = np.array(target_image)
+            target_bgr = cv2.cvtColor(target_np, cv2.COLOR_RGB2BGR)
+            
+            target_faces = self.face_analyzer.get(target_bgr)
+            
+            if not target_faces or len(target_faces) == 0:
+                print("⚠️ 타겟 이미지에 얼굴 없음")
+                return target_image
+            
+            best_face = None
+            best_score = -1
+            
+            for face in target_faces:
+                bbox = face.bbox
+                face_size = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                angle = abs(self.align_face_angle(face.kps))
+                score = face_size * (1.0 / (1.0 + angle / 10.0))
+                
+                if score > best_score:
+                    best_score = score
+                    best_face = face
+            
+            if not best_face:
+                best_face = target_faces[0]
+            
+            print(f"선택된 얼굴 각도: {self.align_face_angle(best_face.kps):.1f}도")
+            
+            print("얼굴 교체 중...")
+            result = self.face_swapper.get(target_bgr, best_face, source_face, paste_back=True)
+            
+            result_rgb = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
+            result_image = Image.fromarray(result_rgb)
+            
+            print("✅ 얼굴 교체 완료")
+            
+            return result_image
+            
+        except Exception as e:
+            print(f"Face Swap 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            return target_image
     
     def base64_to_image(self, base64_string: str) -> Image.Image:
         if base64_string.startswith('data:'):
@@ -50,164 +179,32 @@ class MissingPersonImageGenerator:
         return image
     
     def image_to_base64(self, image: Image.Image) -> str:
-        """이미지를 base64로 변환 (JPEG)"""
         buffered = io.BytesIO()
         
-        # RGBA를 RGB로 변환
-        if image.mode in ('RGBA', 'LA', 'P'):
-            rgb_image = Image.new('RGB', image.size, (255, 255, 255))
-            rgb_image.paste(image, mask=image.split()[-1] if image.mode == 'RGBA' else None)
-            image = rgb_image
-        elif image.mode != 'RGB':
+        if image.mode != 'RGB':
             image = image.convert('RGB')
         
-        # JPEG로 저장
-        image.save(buffered, format="JPEG", quality=95, optimize=True)
-        
-        # base64 인코딩
-        img_bytes = buffered.getvalue()
-        img_str = base64.b64encode(img_bytes).decode('utf-8')
-        
-        print(f"[이미지 변환] base64 길이: {len(img_str)}")
-        print(f"[이미지 변환] 시작 문자: {img_str[:30]}")
+        image.save(buffered, format="JPEG", quality=95)
+        img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
         
         if not img_str.startswith('/9j/'):
-            print(f"❌ 경고: JPEG base64가 /9j/로 시작하지 않음!")
             return None
         
-        print(f"✅ 올바른 JPEG base64 생성됨")
+        print(f"✅ JPEG base64 생성 완료")
         return img_str
     
-    def detect_face_core_region(self, image: Image.Image):
-        """얼굴 핵심 부분만 감지 (눈/코/입만, 안경/모자 제외)"""
-        image_np = np.array(image)
-        image_rgb = cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
-        
-        results = self.face_detection.process(image_rgb)
-        
-        if not results.detections:
-            print("⚠️ 얼굴 감지 실패")
-            return None
-        
-        h, w = image_np.shape[:2]
-        detection = results.detections[0]
-        bbox = detection.location_data.relative_bounding_box
-        
-        x = int(bbox.xmin * w)
-        y = int(bbox.ymin * h)
-        width = int(bbox.width * w)
-        height = int(bbox.height * h)
-        
-        # 얼굴 영역 축소 (안경/모자 제외하고 눈/코/입만)
-        shrink_ratio = 0.2  # 20% 축소
-        x_shrink = int(width * shrink_ratio / 2)
-        y_shrink = int(height * shrink_ratio / 2)
-        
-        x = x + x_shrink
-        y = y + y_shrink
-        width = width - x_shrink * 2
-        height = height - y_shrink * 2
-        
-        # 상단 더 축소 (이마/머리카락/모자 제외)
-        y_top_shrink = int(height * 0.15)
-        y = y + y_top_shrink
-        height = height - y_top_shrink
-        
-        x = max(0, x)
-        y = max(0, y)
-        width = max(width, 50)
-        height = max(height, 50)
-        
-        print(f"✅ 얼굴 핵심 부분만 감지: ({x}, {y}, {width}, {height})")
-        
-        return (x, y, width, height)
-    
-    def create_body_mask(self, image: Image.Image, face_bbox):
-        """얼굴 핵심 부분만 보호하는 마스크 생성 (안경/모자는 생성 가능)"""
-        # 흰색 = 생성할 영역, 검은색 = 유지할 영역
-        mask = Image.new('L', image.size, 255)
-        
-        if face_bbox:
-            x, y, w, h = face_bbox
-            draw = ImageDraw.Draw(mask)
-            
-            # 작은 타원형으로 눈/코/입만 보호
-            draw.ellipse([x, y, x + w, y + h], fill=0)
-            
-            print(f"✅ 얼굴 핵심만 보호 (안경/모자 제외)")
-        
-        return mask
-    
-    def parse_accessories(self, description: str) -> dict:
-        """설명에서 악세서리 정보 추출"""
-        desc_lower = description.lower()
-        
-        accessories = {
-            "has_glasses": False,
-            "has_hat": False,
-            "glasses_desc": "",
-            "hat_desc": ""
-        }
-        
-        # 안경 체크
-        glasses_keywords = ["안경", "glasses", "선글라스", "sunglasses"]
-        for keyword in glasses_keywords:
-            if keyword in desc_lower:
-                accessories["has_glasses"] = True
-                # 안경 종류 추출
-                if "검정" in description or "black" in desc_lower:
-                    accessories["glasses_desc"] = "black glasses"
-                elif "금" in description or "gold" in desc_lower:
-                    accessories["glasses_desc"] = "gold glasses"
-                else:
-                    accessories["glasses_desc"] = "glasses"
-                break
-        
-        # 모자 체크
-        hat_keywords = ["모자", "hat", "캡", "cap", "비니", "beanie"]
-        for keyword in hat_keywords:
-            if keyword in desc_lower:
-                accessories["has_hat"] = True
-                # 모자 종류 추출
-                if "야구" in description or "baseball" in desc_lower:
-                    accessories["hat_desc"] = "baseball cap"
-                elif "비니" in description or "beanie" in desc_lower:
-                    accessories["hat_desc"] = "beanie"
-                else:
-                    accessories["hat_desc"] = "hat"
-                break
-        
-        return accessories
-    
     def translate_description_to_english(self, korean_desc: str) -> str:
-        """NER 서버의 Qwen으로 번역"""
-        if not korean_desc or not korean_desc.strip():
-            return ""
-        
         try:
-            print(f"[번역 요청] {korean_desc}")  # 전체 출력
-            
             response = requests.post(
                 'http://localhost:8000/api/translate',
                 json={"text": korean_desc},
                 timeout=30
             )
-            
             if response.status_code == 200:
-                data = response.json()
-                translation = data.get("translation", korean_desc)
-                print(f"[번역 완료] {translation}")
-                return translation
-            else:
-                print(f"번역 API 실패: {response.status_code}")
-                return korean_desc
-                
-        except requests.exceptions.ConnectionError:
-            print("⚠️ NER 서버 연결 실패 - 원본 사용")
-            return korean_desc
-        except Exception as e:
-            print(f"번역 오류: {e}")
-            return korean_desc
+                return response.json().get("translation", korean_desc)
+        except:
+            pass
+        return korean_desc
     
     def generate_missing_person_image(
         self,
@@ -217,74 +214,110 @@ class MissingPersonImageGenerator:
         gender: str
     ) -> str:
         try:
-            if not self.inpaint_pipeline:
+            if not self.sdxl_pipeline:
                 self.initialize_models()
             
+            print("\n=== Face Swap + Compel 전신 이미지 생성 시작 ===")
+            
+            # 1. 원본에서 얼굴 추출
+            print("\n1단계: 원본 얼굴 추출")
             original_image = self.base64_to_image(original_photo_base64)
-            original_image = original_image.resize((1024, 1024))
             
-            face_bbox = self.detect_face_core_region(original_image)
+            source_face = self.extract_source_face(original_image)
             
-            if not face_bbox:
-                print("⚠️ 얼굴 감지 실패 - 원본 반환")
+            if not source_face:
+                print("⚠️ 얼굴 추출 실패 - 원본 반환")
                 return original_photo_base64.split(',')[1] if ',' in original_photo_base64 else original_photo_base64
             
-            body_mask = self.create_body_mask(original_image, face_bbox)
-            accessories = self.parse_accessories(description)
+            # 2. 프롬프트 생성
+            print("\n2단계: 긴 프롬프트 생성")
             
-            # gender 정보를 description에 추가
-            full_description = f"{gender}, {age}세, {description}"
-            print(f"[전체 설명] {full_description}")
+            english_desc = self.translate_description_to_english(description)
             
-            # 한글 설명 (성별 포함)을 영어 키워드로 번역
-            english_desc = self.translate_description_to_english(full_description)
+            print(f"[번역된 설명] {english_desc}")
             
-            # gender 정보는 이미 번역에 포함되어 있으므로 별도로 추가 안 함
+            gender_en = "male" if gender == "남성" else "female"
             
-            # 간결한 프롬프트 구성
-            prompt = f"photo, Korean person, {english_desc}"
+            prompt = f"""professional full body portrait photograph,
+Korean {gender_en} person, {age} years old,
+{english_desc},
+standing straight in natural pose, facing camera directly, looking at camera,
+front view, frontal angle, centered in frame,
+plain white background, clean studio lighting, professional photography,
+high quality, realistic, detailed, sharp focus, photorealistic,
+full body visible from head to toe, complete figure showing entire body,
+well-lit, proper exposure, clear details"""
             
-            # 안경 추가
-            if accessories["has_glasses"]:
-                prompt += f", {accessories['glasses_desc']}"
-            else:
-                prompt += ", no glasses"
+            negative_prompt = """portrait only, headshot, close-up shot, upper body only, half body, cropped body, cut off,
+sitting, lying down, kneeling, bent over,
+side view, profile view, back view, rear view, turned away,
+looking away, looking down, looking up, eyes closed, head turned,
+cartoon, anime, illustration, drawing, painting, sketch, rendered, CGI, 3D,
+low quality, blurry, out of focus, distorted, deformed, ugly, bad anatomy,
+multiple people, crowd, duplicated, extra limbs, missing limbs,
+dark, underexposed, overexposed, bad lighting"""
             
-            # 모자 추가
-            if accessories["has_hat"]:
-                prompt += f", {accessories['hat_desc']}"
-            else:
-                prompt += ", no hat"
-            
-            prompt += ", realistic, detailed"
-            
-            # Negative prompt
-            negative = "cartoon, anime, different face, low quality, blurry"
-            
-            if not accessories["has_glasses"]:
-                negative += ", glasses, eyewear"
-            
-            if not accessories["has_hat"]:
-                negative += ", hat, cap"
-            
-            print("이미지 생성 중...")
-            print(f"[프롬프트 길이] {len(prompt.split())} 단어")
             print(f"[프롬프트] {prompt}")
-            print(f"[안경] {accessories['has_glasses']}, [모자] {accessories['has_hat']}")
+            print(f"[프롬프트 단어 수] {len(prompt.split())}")
             
-            generated_image = self.inpaint_pipeline(
-                prompt=prompt,
-                negative_prompt=negative,
-                image=original_image,
-                mask_image=body_mask,
-                num_inference_steps=40,
-                guidance_scale=8.0,
-                strength=0.95
-            ).images[0]
+            # 3. Compel로 긴 프롬프트 처리
+            print("\n3단계: Compel로 프롬프트 인코딩")
             
-            print("✅ 이미지 생성 완료")
+            conditioning_result = self.compel(prompt)
+            negative_conditioning_result = self.compel(negative_prompt)
             
-            result_base64 = self.image_to_base64(generated_image)
+            # 튜플 언팩킹
+            if isinstance(conditioning_result, tuple) and len(conditioning_result) == 2:
+                conditioning, pooled_conditioning = conditioning_result
+                negative_conditioning, negative_pooled = negative_conditioning_result
+                print("✅ 프롬프트 인코딩 완료 (pooled 포함)")
+            else:
+                conditioning = conditioning_result
+                negative_conditioning = negative_conditioning_result
+                pooled_conditioning = None
+                negative_pooled = None
+                print("✅ 프롬프트 인코딩 완료")
+            
+            # 4. SDXL로 템플릿 생성
+            print("\n4단계: SDXL 전신 템플릿 생성")
+            print("   (약 20-30초 소요)")
+            
+            generator = torch.Generator(device=self.device).manual_seed(42)
+            
+            if pooled_conditioning is not None:
+                template_image = self.sdxl_pipeline(
+                    prompt_embeds=conditioning,
+                    pooled_prompt_embeds=pooled_conditioning,
+                    negative_prompt_embeds=negative_conditioning,
+                    negative_pooled_prompt_embeds=negative_pooled,
+                    num_inference_steps=35,
+                    guidance_scale=8.5,
+                    height=1024,
+                    width=768,
+                    generator=generator
+                ).images[0]
+            else:
+                template_image = self.sdxl_pipeline(
+                    prompt_embeds=conditioning,
+                    negative_prompt_embeds=negative_conditioning,
+                    num_inference_steps=35,
+                    guidance_scale=8.5,
+                    height=1024,
+                    width=768,
+                    generator=generator
+                ).images[0]
+            
+            print("✅ 템플릿 생성 완료")
+            
+            # 5. 얼굴 교체
+            print("\n5단계: 얼굴 교체 (각도 보정)")
+            
+            final_image = self.swap_face_with_alignment(template_image, source_face)
+            
+            print("✅ 최종 이미지 생성 완료")
+            
+            # 6. Base64 변환
+            result_base64 = self.image_to_base64(final_image)
             
             return result_base64
             
@@ -292,7 +325,8 @@ class MissingPersonImageGenerator:
             print(f"이미지 생성 오류: {e}")
             import traceback
             traceback.print_exc()
-            return None
+            
+            return original_photo_base64.split(',')[1] if ',' in original_photo_base64 else original_photo_base64
 
 generator = None
 

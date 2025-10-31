@@ -14,3 +14,5 @@ transformers
 accelerate
 controlnet-aux
 mediapipe
+insightface
+onnxruntime

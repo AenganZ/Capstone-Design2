@@ -160,7 +160,7 @@ priority는 다음 중 하나: HIGH, MEDIUM, LOW
             return self._get_fallback_analysis(age, gender)
         
     def translate_to_english(self, korean_text: str) -> str:
-        """한글 의류 설명을 영어 키워드로 번역 (문장 금지)"""
+        """한글 의류 설명을 영어 구문으로 번역"""
         if not korean_text or not korean_text.strip():
             return ""
         
@@ -168,89 +168,85 @@ priority는 다음 중 하나: HIGH, MEDIUM, LOW
             return korean_text
         
         try:
-            prompt = f"""다음 한국어 설명을 짧은 영어 키워드로만 변환하세요.
+            # 더 명확한 문법 지시
+            prompt = f"""Translate Korean description to clear English phrases with proper grammar.
 
-    입력: {korean_text}
+    Important rules:
+    1. Use clear subject-verb structure
+    2. Separate clothing items clearly with commas
+    3. For hair: write "has [color] hair" or "[color] hair" (NOT "wearing hair")
+    4. For shoes: write "wearing [shoe type]"
+    5. Keep adjective+noun together (gray hoodie, not gray, hoodie)
 
-    규칙:
-    1. 쉼표로 구분된 키워드만 출력
-    2. 완전한 문장 금지 (She/He, stands, wearing 등 동사 사용 금지)
-    3. 키워드만: 키, 몸무게, 체형, 머리, 안경, 의류, 신발, 가방
-    4. 괄호 안 상세정보는 제외
-    5. 최대 50단어 이내
+    Examples:
+    Korean: 회색 후드, 청바지, 슬리퍼, 노란 머리
+    English: gray hoodie, blue jeans, wearing slippers, has yellow hair
 
-    예시:
-    입력: 178cm/67kg, 마른 근육형, 짧은 검은 머리, 검정 테 둥근 안경 착용. 회색 후드에 검은 조거팬츠, 흰색 러닝화
-    출력: 178cm, 67kg, slim muscular build, short black hair, black round glasses, gray hoodie, black jogger pants, white running shoes
+    Korean: 검은 정장, 갈색 구두, 짧은 검은 머리
+    English: black suit, brown shoes, short black hair
 
-    입력: 165cm/55kg, 긴 생머리, 파란 원피스, 흰색 운동화
-    출력: 165cm, 55kg, long straight hair, blue dress, white sneakers
+    Korean: 회색 나이키 후드티와 짧은 청바지를 입고 있었으며, 슬리퍼를 신고 짧은 노란색 염색 머리
+    English: gray Nike hoodie, short blue jeans, wearing slippers, short yellow dyed hair
 
-    영어 키워드만 출력:"""
+    Now translate (use proper grammar, don't use "wearing" for hair):
+    Korean: {korean_text}
+    English:"""
 
             messages = [
-                {"role": "system", "content": "You are a translator. Output ONLY comma-separated English keywords. NO complete sentences. NO verbs like 'wearing', 'dressed', 'stands'."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system", 
+                    "content": "You are a translator. Translate Korean to natural English with proper grammar. Hair is 'has [color] hair' not 'wearing hair'. Shoes use 'wearing [shoes]'."
+                },
+                {
+                    "role": "user", 
+                    "content": prompt
+                }
             ]
             
-            text_input = self.tokenizer.apply_chat_template(
+            print(f"[번역 요청] {korean_text}")
+            
+            text = self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
                 add_generation_prompt=True
             )
             
-            model_inputs = self.tokenizer([text_input], return_tensors="pt").to(self.device)
+            model_inputs = self.tokenizer([text], return_tensors="pt").to(self.device)
             
             with torch.no_grad():
                 generated_ids = self.model.generate(
-                    model_inputs.input_ids,
-                    max_new_tokens=200,  # 512 → 200으로 축소
-                    temperature=0.2,  # 0.3 → 0.2로 더 결정적으로
+                    **model_inputs,
+                    max_new_tokens=120,
+                    temperature=0.05,
                     top_p=0.9,
-                    do_sample=True
+                    do_sample=True,
+                    repetition_penalty=1.1,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id
                 )
             
             generated_ids = [
-                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+                output_ids[len(input_ids):] 
+                for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
             ]
             
             response = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
             
-            # 응답 정리
-            response = response.strip()
+            english_text = response.strip().split('\n')[0].strip()
             
-            # 불필요한 접두사 제거
-            prefixes_to_remove = [
-                "영어:", "English:", "영어 키워드:", "Keywords:", 
-                "Translation:", "Output:", "답변:", "Answer:",
-                "출력:", "Result:"
-            ]
-            for prefix in prefixes_to_remove:
-                if response.lower().startswith(prefix.lower()):
-                    response = response[len(prefix):].strip()
+            for prefix in ["English:", "Output:", "Translation:", "Result:"]:
+                if english_text.lower().startswith(prefix.lower()):
+                    english_text = english_text[len(prefix):].strip()
             
-            # 따옴표 제거
-            response = response.strip('"\'')
+            english_text = english_text.replace('"', '').replace("'", '')
             
-            # 문장으로 시작하면 잘라내기 (She/He/The/A 등)
-            sentence_starts = ["she stands", "he stands", "she is", "he is", "the person", "a person"]
-            for start in sentence_starts:
-                if response.lower().startswith(start):
-                    # 문장을 키워드로 변환 시도
-                    response = self._extract_keywords_from_sentence(response)
-                    break
+            import re
+            english_text = re.sub(r'\([^)]*\)', '', english_text)
+            english_text = ' '.join(english_text.split())
             
-            # 단어 수 제한 (50단어 초과 시 자르기)
-            words = response.split(',')
-            if len(words) > 15:
-                response = ', '.join(words[:15])
-                print(f"⚠️ 키워드 수 제한: {len(words)} → 15개")
+            print(f"[번역 결과] {english_text}")
             
-            print(f"[번역] 한글: {korean_text}")
-            print(f"[번역] 영어: {response}")
-            print(f"[번역] 단어 수: {len(response.split(','))}")
-            
-            return response
+            return english_text
             
         except Exception as e:
             print(f"번역 오류: {e}")
