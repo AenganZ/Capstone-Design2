@@ -35,22 +35,17 @@ class MissingPersonImageGenerator:
             self.face_analyzer.prepare(ctx_id=0, det_size=(640, 640))
             print("✅ InsightFace 로딩 완료")
             
-            # 2. Face Swapper
-            print("2. Face Swapper 모델 다운로드 중...")
-            try:
-                swapper_model_path = hf_hub_download(
-                    repo_id="deepinsight/inswapper",
-                    filename="inswapper_128.onnx",
-                    repo_type="model"
-                )
-                self.face_swapper = insightface.model_zoo.get_model(swapper_model_path)
-                print("✅ Face Swapper 로딩 완료")
-            except Exception as e:
-                print(f"⚠️ Face Swapper 로딩 실패: {e}")
-                swapper_path = "./models/inswapper_128.onnx"
-                if os.path.exists(swapper_path):
-                    self.face_swapper = insightface.model_zoo.get_model(swapper_path)
-                    print("✅ 로컬 Face Swapper 사용")
+            # 2. Face Swapper (로컬만 사용)
+            print("2. Face Swapper 모델 로딩 중 (로컬)...")
+            swapper_path = "./models/inswapper_128.onnx"
+            
+            if not os.path.exists(swapper_path):
+                print(f"❌ Face Swapper 파일 없음: {swapper_path}")
+                print(f"   모델을 다음 경로에 배치하세요: {swapper_path}")
+                self.face_swapper = None
+            else:
+                self.face_swapper = insightface.model_zoo.get_model(swapper_path)
+                print(f"✅ Face Swapper 로딩 완료 (로컬: {swapper_path})")
             
             # 3. SDXL 파이프라인
             print("3. SDXL 파이프라인 로딩 중...")
@@ -241,21 +236,38 @@ class MissingPersonImageGenerator:
             prompt = f"""professional full body portrait photograph,
 Korean {gender_en} person, {age} years old,
 {english_desc},
-standing straight in natural pose, facing camera directly, looking at camera,
-front view, frontal angle, centered in frame,
-plain white background, clean studio lighting, professional photography,
-high quality, realistic, detailed, sharp focus, photorealistic,
-full body visible from head to toe, complete figure showing entire body,
-well-lit, proper exposure, clear details"""
+standing is not allowed.
+seated on a simple backless stool (seat height 45–50cm), slight anterior pelvic tilt.
+camera at eye level to the torso (navel to chest height), 70–100mm lens, distance ~3–4m to avoid distortion.
+front view; centered; full body visible head to toe; no cropping.
+natural relaxed posture: torso leaning forward 5–10°, shoulders neutral.
+knees shoulder-width (90–100° angle), lower legs slightly forward so trousers and shoes are fully visible; feet flat, toes pointing forward.
+hands resting lightly on thighs, fingers naturally separated; detailed hands (nails, knuckles) without covering garments.
+plain white seamless background; clean studio lighting; soft key 45° camera-left, gentle rim light; fill -1EV; even professional exposure; sharp focus; photorealistic fashion lookbook.
+trousers show realistic fabric drape and subtle knee folds; hem sits lightly on shoes; socks minimal and unobtrusive.
+shoes fully visible (uppers and a hint of outsole), no perspective exaggeration.
+cap/logo minimal without readable text."""
             
-            negative_prompt = """portrait only, headshot, close-up shot, upper body only, half body, cropped body, cut off,
-sitting, lying down, kneeling, bent over,
+            negative_prompt = """portrait only, headshot, close-up, upper body only, half body, cropped, cut off, cut feet, cut shoes,
+standing pose, crouching, squatting, lying down, kneeling, bent over,
 side view, profile view, back view, rear view, turned away,
 looking away, looking down, looking up, eyes closed, head turned,
+crossed legs, legs tucked under chair, hands covering clothes, clenched fists, slouching, leaning back too far,
+busy background, props, chair back, armrests,
+wide-angle distortion, big head, foreshortened head, fisheye, extreme perspective, dutch angle,
 cartoon, anime, illustration, drawing, painting, sketch, rendered, CGI, 3D,
-low quality, blurry, out of focus, distorted, deformed, ugly, bad anatomy,
-multiple people, crowd, duplicated, extra limbs, missing limbs,
-dark, underexposed, overexposed, bad lighting"""
+low quality, blurry, out of focus, motion blur, distorted, deformed, ugly, bad anatomy, bad hands, extra fingers,
+multiple people, crowd, duplicated, duplicate person, extra limbs, missing limbs,
+text, watermark, readable logo, frame, border,
+dark, underexposed, overexposed, harsh shadows, color cast, uneven lighting,
+partial body crop,
+hood up, hood worn, hood forward, hood visible around the head, hood framing the face,
+hood touching/overlapping/covering the cap or brim, hood covering ears,
+hood casting shadow onto the cap,
+wearing the hood when wearing a hoodie (hood must not be worn),
+beanie when baseball cap requested, knit cap when baseball cap requested,
+baseball cap when beanie requested, curved brim when beanie requested,
+wrong hat type, incorrect headwear"""
             
             print(f"[프롬프트] {prompt}")
             print(f"[프롬프트 단어 수] {len(prompt.split())}")

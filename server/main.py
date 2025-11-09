@@ -273,7 +273,7 @@ app.add_middleware(
 manager = ConnectionManager()
 api_manager = OptimizedAPIManager()
 
-SAFE_URL = "https://www.safe182.go.kr/api/lcm/amberList.do"
+SAFE_URL = "https://www.safe182.go.kr/api/lcm/findChildList.do"
 KAKAO_GEO = "https://dapi.kakao.com/v2/local/search/address.json"
 ITS_CCTV_URL = "https://openapi.its.go.kr:9443/cctvInfo"
 WEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
@@ -610,18 +610,22 @@ def get_existing_person_ids() -> set:
 
 async def fetch_safe182_data():
     try:
-        from datetime import datetime
+        from datetime import datetime, timedelta
         
-        # 2025년 1월 1일부터 오늘까지
-        start_date = "20250101"
-        end_date = datetime.now().strftime("%Y%m%d")
+        # 오늘 기준 3개월 전부터 오늘까지
+        end_date_dt = datetime.now()
+        start_date_dt = end_date_dt - timedelta(days=90)
+        
+        # findChildList API는 YYYY-MM-DD 형식 사용
+        start_date = start_date_dt.strftime("%Y-%m-%d")  # ⭐ %Y%m%d → %Y-%m-%d
+        end_date = end_date_dt.strftime("%Y-%m-%d")      # ⭐ %Y%m%d → %Y-%m-%d
         
         params = {
             "rowSize": 100, 
             "page": 1,
             "occrAdres": "대전",
-            "occrde1": start_date,  # 시작 날짜 추가
-            "occrde2": end_date     # 종료 날짜 추가
+            "detailDate1": start_date,  # ⭐ occrde1 → detailDate1
+            "detailDate2": end_date      # ⭐ occrde2 → detailDate2
         }
         
         if SAFE182_ESNTL_ID and SAFE182_AUTH_KEY:
@@ -630,7 +634,7 @@ async def fetch_safe182_data():
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             start_time = time.time()
-            response = await client.get(SAFE_URL, params=params)
+            response = await client.post(SAFE_URL, data=params)  # ⭐ 그냥 SAFE_URL 사용
             response_time = time.time() - start_time
             
             if response.status_code != 200:
@@ -640,13 +644,8 @@ async def fetch_safe182_data():
             
             data = response.json()
             
-            # 응답 형식 확인 및 처리
             if isinstance(data, dict):
-                if "persons" in data:
-                    persons_list = data["persons"]
-                elif "data" in data:
-                    persons_list = data["data"]
-                elif "list" in data:
+                if "list" in data:
                     persons_list = data["list"]
                 else:
                     log_system_event("WARNING", "SAFE182_API", f"알 수 없는 응답 형식: {list(data.keys())}")
@@ -657,13 +656,13 @@ async def fetch_safe182_data():
                 log_system_event("WARNING", "SAFE182_API", "응답이 예상 형식이 아닙니다")
                 return []
             
-            await log_api_request("SAFE182", "GET", len(persons_list), True, response_time)
-            print(f"✅ Safe182에서 {len(persons_list)}명의 실종자 데이터를 가져왔습니다 ({start_date} ~ {end_date})")
+            await log_api_request("SAFE182", "POST", len(persons_list), True, response_time)
+            print(f"Safe182에서 {len(persons_list)}명의 실종자 데이터를 가져왔습니다 ({start_date} ~ {end_date})")
             return persons_list
             
     except Exception as e:
         api_manager.record_error()
-        await log_api_request("SAFE182", "GET", 0, False, 0, str(e))
+        await log_api_request("SAFE182", "POST", 0, False, 0, str(e))
         log_system_event("ERROR", "SAFE182_API", f"API 호출 실패: {e}")
         return []
 
@@ -688,7 +687,7 @@ async def send_to_ner_server(raw_data_list: List[Dict]) -> List[Dict]:
                 "faceshpeDscd": raw_data.get("faceshpeDscd", ""),
                 "hairshpeDscd": raw_data.get("hairshpeDscd", ""),
                 "haircolrDscd": raw_data.get("haircolrDscd", ""),
-                "tkphotolength": raw_data.get("tkphotolength", ""),
+                "tknphotolength": raw_data.get("tknphotolength", ""),
                 "tknphotoFile": raw_data.get("tknphotoFile", "")
             }
             

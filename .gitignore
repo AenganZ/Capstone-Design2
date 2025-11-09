@@ -6,3 +6,5 @@ missing_persons.db
 debug.py
 test.py
 firebase_key.json
+/models
+/tmp

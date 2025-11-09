@@ -43,7 +43,6 @@ class _MissingPersonDetailScreenState extends State<MissingPersonDetailScreen> {
             _buildExtractedFeaturesSection(),
             _buildRiskFactorsSection(),
             _buildLocationSection(),
-            _buildEmergencyContactSection(),
             const SizedBox(height: 80),
           ],
         ),
@@ -52,17 +51,18 @@ class _MissingPersonDetailScreenState extends State<MissingPersonDetailScreen> {
     );
   }
 
+  // ✅ 사진 크기 증가: 500 → 600
   Widget _buildPhotoSection() {
     return Container(
       width: double.infinity,
-      height: 300,
+      height: 600,  // ✅ 500 → 600으로 증가
       color: Colors.black,
       child: widget.person.photoBase64 != null && widget.person.photoBase64!.isNotEmpty
           ? _buildSafeImage()
           : const Center(
               child: Icon(
                 Icons.person,
-                size: 100,
+                size: 180,  // ✅ 아이콘도 더 크게
                 color: Colors.white54,
               ),
             ),
@@ -79,6 +79,8 @@ class _MissingPersonDetailScreenState extends State<MissingPersonDetailScreen> {
       
       return Image.memory(
         bytes,
+        width: double.infinity,
+        height: 600,  // ✅ 높이 600
         fit: BoxFit.contain,
         errorBuilder: (context, error, stackTrace) {
           print('상세화면 이미지 로딩 실패: $error');
@@ -96,7 +98,7 @@ class _MissingPersonDetailScreenState extends State<MissingPersonDetailScreen> {
     return const Center(
       child: Icon(
         Icons.person,
-        size: 100,
+        size: 180,  // ✅ 플레이스홀더도 크게
         color: Colors.white54,
       ),
     );
@@ -380,81 +382,13 @@ class _MissingPersonDetailScreenState extends State<MissingPersonDetailScreen> {
               color: const Color(0xFFF0F9FF),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.person.location ?? '위치 정보 없음',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: Color(0xFF1F2937),
-                    height: 1.5,
-                  ),
-                ),
-                if (widget.person.lat != null && widget.person.lng != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    '좌표: ${widget.person.lat!.toStringAsFixed(6)}, ${widget.person.lng!.toStringAsFixed(6)}',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Color(0xFF6B7280),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmergencyContactSection() {
-    if (widget.person.emergencyContact == null) return const SizedBox.shrink();
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(
-          bottom: BorderSide(color: Color(0xFFE5E7EB), width: 1),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(
-                Icons.phone,
-                color: Color(0xFF10B981),
-                size: 24,
-              ),
-              SizedBox(width: 8),
-              Text(
-                '비상 연락처',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF1F2937),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFECFDF5),
-              borderRadius: BorderRadius.circular(8),
-            ),
             child: Text(
-              widget.person.emergencyContact!,
+              widget.person.location ?? '위치 정보 없음',
               style: const TextStyle(
                 fontSize: 16,
+                fontWeight: FontWeight.w600,
                 color: Color(0xFF1F2937),
+                height: 1.5,
               ),
             ),
           ),

@@ -168,34 +168,24 @@ priority는 다음 중 하나: HIGH, MEDIUM, LOW
             return korean_text
         
         try:
-            # 더 명확한 문법 지시
-            prompt = f"""Translate Korean description to clear English phrases with proper grammar.
+            prompt = f"""Translate to English only. No explanations.
 
-    Important rules:
-    1. Use clear subject-verb structure
-    2. Separate clothing items clearly with commas
-    3. For hair: write "has [color] hair" or "[color] hair" (NOT "wearing hair")
-    4. For shoes: write "wearing [shoe type]"
-    5. Keep adjective+noun together (gray hoodie, not gray, hoodie)
+Korean: 검은 캡모자, 회색 후드티, 청바지
+English: black baseball cap, gray hoodie, blue jeans
 
-    Examples:
-    Korean: 회색 후드, 청바지, 슬리퍼, 노란 머리
-    English: gray hoodie, blue jeans, wearing slippers, has yellow hair
+Korean: 비니, 패딩, 검은 바지
+English: beanie, padded jacket, black pants
 
-    Korean: 검은 정장, 갈색 구두, 짧은 검은 머리
-    English: black suit, brown shoes, short black hair
+Korean: 야구 캡, 흰 티셔츠, 운동화
+English: baseball cap, white t-shirt, wearing sneakers
 
-    Korean: 회색 나이키 후드티와 짧은 청바지를 입고 있었으며, 슬리퍼를 신고 짧은 노란색 염색 머리
-    English: gray Nike hoodie, short blue jeans, wearing slippers, short yellow dyed hair
-
-    Now translate (use proper grammar, don't use "wearing" for hair):
-    Korean: {korean_text}
-    English:"""
+Korean: {korean_text}
+English:"""
 
             messages = [
                 {
                     "role": "system", 
-                    "content": "You are a translator. Translate Korean to natural English with proper grammar. Hair is 'has [color] hair' not 'wearing hair'. Shoes use 'wearing [shoes]'."
+                    "content": "You translate Korean to English. Output only the English translation. No explanations."
                 },
                 {
                     "role": "user", 
@@ -216,11 +206,10 @@ priority는 다음 중 하나: HIGH, MEDIUM, LOW
             with torch.no_grad():
                 generated_ids = self.model.generate(
                     **model_inputs,
-                    max_new_tokens=120,
-                    temperature=0.05,
+                    max_new_tokens=100,
+                    temperature=0.3,
                     top_p=0.9,
                     do_sample=True,
-                    repetition_penalty=1.1,
                     pad_token_id=self.tokenizer.pad_token_id,
                     eos_token_id=self.tokenizer.eos_token_id
                 )
@@ -234,8 +223,8 @@ priority는 다음 중 하나: HIGH, MEDIUM, LOW
             
             english_text = response.strip().split('\n')[0].strip()
             
-            for prefix in ["English:", "Output:", "Translation:", "Result:"]:
-                if english_text.lower().startswith(prefix.lower()):
+            for prefix in ["English:", "Translation:", "Output:", "Result:", "Korean:", "->", "："]:
+                if english_text.startswith(prefix):
                     english_text = english_text[len(prefix):].strip()
             
             english_text = english_text.replace('"', '').replace("'", '')
@@ -243,6 +232,14 @@ priority는 다음 중 하나: HIGH, MEDIUM, LOW
             import re
             english_text = re.sub(r'\([^)]*\)', '', english_text)
             english_text = ' '.join(english_text.split())
+            
+            if not english_text or len(english_text) < 3:
+                print(f"⚠️ 번역 결과 없음, 원본 사용")
+                return korean_text
+            
+            if "translate" in english_text.lower() or "following" in english_text.lower():
+                print(f"⚠️ 메타 설명 감지, 원본 사용")
+                return korean_text
             
             print(f"[번역 결과] {english_text}")
             
