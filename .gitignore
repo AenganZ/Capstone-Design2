@@ -8,3 +8,4 @@ test.py
 firebase_key.json
 /models
 /tmp
+/server/models/inswapper_128.onnx
