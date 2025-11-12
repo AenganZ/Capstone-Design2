@@ -24,7 +24,7 @@ SAFE182_AUTH_KEY = os.getenv("SAFE182_AUTH_KEY", "")
 KAKAO_API_KEY = os.getenv("KAKAO_API_KEY")
 KAKAO_JAVASCRIPT_KEY = os.getenv("KAKAO_JAVASCRIPT_KEY")
 FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS", "./firebase_key.json")
-NER_SERVER_URL = os.getenv("NER_SERVER_URL", "http://localhost:8000")
+PHI_SERVER_URL = os.getenv("PHI_SERVER_URL", "http://localhost:8000")
 ITS_CCTV_API_KEY = os.getenv("ITS_CCTV_API_KEY", "")
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 
@@ -39,7 +39,7 @@ class MissingPerson(BaseModel):
     photo_base64: Optional[str] = None
     priority: str = "MEDIUM"
     risk_factors: List[str] = []
-    ner_entities: Dict[str, List[str]] = {}
+    phi_entities: Dict[str, List[str]] = {}
     extracted_features: Dict[str, List[str]] = {}
     lat: float = 36.3504
     lng: float = 127.3845
@@ -242,7 +242,7 @@ async def lifespan(app: FastAPI):
     else:
         print("Firebase 사용 불가 - FCM 기능 제한됨")
     
-    await check_ner_server()
+    await check_phi_server()
     await init_background_tasks()
     
     polling_task = asyncio.create_task(start_optimized_polling())
@@ -278,16 +278,16 @@ KAKAO_GEO = "https://dapi.kakao.com/v2/local/search/address.json"
 ITS_CCTV_URL = "https://openapi.its.go.kr:9443/cctvInfo"
 WEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
 
-async def check_ner_server():
+async def check_phi_server():
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(f"{NER_SERVER_URL}/api/health")
+            response = await client.get(f"{PHI_SERVER_URL}/api/health")
             if response.status_code == 200:
-                print("NER 서버 연결 확인됨")
+                print("Phi 서버 연결 확인됨")
                 return True
     except Exception as e:
-        print(f"NER 서버 연결 실패: {e}")
-        print("ner_server.py를 먼저 실행해주세요")
+        print(f"Phi 서버 연결 실패: {e}")
+        print("Phi_server.py를 먼저 실행해주세요")
     return False
 
 async def init_background_tasks():
@@ -336,7 +336,7 @@ async def init_database():
             photo_base64 TEXT,
             priority TEXT,
             risk_factors TEXT,
-            ner_entities TEXT,
+            phi_entities TEXT,
             extracted_features TEXT,
             lat REAL,
             lng REAL,
@@ -535,7 +535,7 @@ def save_missing_person(person: MissingPerson):
     cursor.execute('''
         INSERT OR REPLACE INTO missing_persons 
         (id, name, age, gender, location, description, photo_url, photo_base64, 
-         priority, risk_factors, ner_entities, extracted_features, lat, lng, 
+         priority, risk_factors, phi_entities, extracted_features, lat, lng, 
          created_at, updated_at, status, category, source, confidence_score,
          last_seen, clothing_description, medical_condition, emergency_contact)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -543,7 +543,7 @@ def save_missing_person(person: MissingPerson):
         person.id, person.name, person.age, person.gender, person.location,
         person.description, person.photo_url, person.photo_base64, person.priority,
         json.dumps(person.risk_factors, ensure_ascii=False),
-        json.dumps(person.ner_entities, ensure_ascii=False),
+        json.dumps(person.phi_entities, ensure_ascii=False),
         json.dumps(person.extracted_features, ensure_ascii=False),
         person.lat, person.lng, person.created_at, current_time, person.status, 
         person.category, person.source, person.confidence_score,
@@ -562,7 +562,7 @@ def get_missing_persons(status: str = "ACTIVE", limit: int = None, offset: int =
     
     query = '''
         SELECT id, name, age, gender, location, description, photo_url, photo_base64,
-               priority, risk_factors, ner_entities, extracted_features, lat, lng,
+               priority, risk_factors, phi_entities, extracted_features, lat, lng,
                created_at, updated_at, status, category, source, confidence_score,
                last_seen, clothing_description, medical_condition, emergency_contact
         FROM missing_persons 
@@ -586,11 +586,11 @@ def get_missing_persons(status: str = "ACTIVE", limit: int = None, offset: int =
         
         try:
             person_dict['risk_factors'] = json.loads(person_dict.get('risk_factors') or '[]')
-            person_dict['ner_entities'] = json.loads(person_dict.get('ner_entities') or '{}')
+            person_dict['phi_entities'] = json.loads(person_dict.get('phi_entities') or '{}')
             person_dict['extracted_features'] = json.loads(person_dict.get('extracted_features') or '{}')
         except json.JSONDecodeError:
             person_dict['risk_factors'] = []
-            person_dict['ner_entities'] = {}
+            person_dict['phi_entities'] = {}
             person_dict['extracted_features'] = {}
         
         persons.append(person_dict)
@@ -666,7 +666,7 @@ async def fetch_safe182_data():
         log_system_event("ERROR", "SAFE182_API", f"API 호출 실패: {e}")
         return []
 
-async def send_to_ner_server(raw_data_list: List[Dict]) -> List[Dict]:
+async def send_to_phi_server(raw_data_list: List[Dict]) -> List[Dict]:
     try:
         enriched_data_list = []
         for raw_data in raw_data_list:
@@ -711,7 +711,7 @@ async def send_to_ner_server(raw_data_list: List[Dict]) -> List[Dict]:
         async with httpx.AsyncClient(timeout=60.0) as client:
             start_time = time.time()
             response = await client.post(
-                f"{NER_SERVER_URL}/api/process_missing_persons",
+                f"{PHI_SERVER_URL}/api/process_missing_persons",
                 json={"raw_data_list": enriched_data_list}
             )
             response_time = time.time() - start_time
@@ -719,11 +719,11 @@ async def send_to_ner_server(raw_data_list: List[Dict]) -> List[Dict]:
             if response.status_code == 200:
                 processed_data = response.json()
                 await log_api_request("NER_SERVER", "POST", len(processed_data), True, response_time)
-                print(f"NER 서버에서 {len(processed_data)}명의 데이터를 처리했습니다")
+                print(f"Phi 서버에서 {len(processed_data)}명의 데이터를 처리했습니다")
                 return processed_data
             else:
                 await log_api_request("NER_SERVER", "POST", 0, False, response_time, f"HTTP {response.status_code}")
-                print(f"NER 서버 오류: {response.status_code}")
+                print(f"Phi 서버 오류: {response.status_code}")
                 return []
                 
     except Exception as e:
@@ -1139,7 +1139,7 @@ async def start_optimized_polling():
             
             api_manager.update_cache(raw_data_list)
             
-            processed_data = await send_to_ner_server(raw_data_list)
+            processed_data = await send_to_phi_server(raw_data_list)
             if not processed_data:
                 await asyncio.sleep(300)
                 continue
@@ -1368,7 +1368,7 @@ async def create_missing_person(request: Dict[str, Any] = Body(...)):
         cursor.execute('''
             INSERT INTO missing_persons (
                 id, name, age, gender, location, description, photo_url, photo_base64,
-                priority, risk_factors, ner_entities, extracted_features, lat, lng,
+                priority, risk_factors, phi_entities, extracted_features, lat, lng,
                 created_at, updated_at, status, category, source, confidence_score,
                 last_seen, clothing_description, medical_condition, emergency_contact,
                 approval_status
@@ -1378,7 +1378,7 @@ async def create_missing_person(request: Dict[str, Any] = Body(...)):
             missing_person.location, missing_person.description, missing_person.photo_url,
             missing_person.photo_base64, missing_person.priority,
             json.dumps(missing_person.risk_factors),
-            json.dumps(missing_person.ner_entities),
+            json.dumps(missing_person.phi_entities),
             json.dumps(missing_person.extracted_features),
             missing_person.lat, missing_person.lng,
             missing_person.created_at, missing_person.updated_at,
@@ -1536,7 +1536,7 @@ async def get_person_detail(person_id: str):
         
         cursor.execute('''
             SELECT id, name, age, gender, location, description, photo_url, photo_base64,
-                   priority, risk_factors, ner_entities, extracted_features, lat, lng,
+                   priority, risk_factors, phi_entities, extracted_features, lat, lng,
                    created_at, updated_at, status, category, source, confidence_score,
                    last_seen, clothing_description, medical_condition, emergency_contact,
                    approval_status, rejection_reason
@@ -1554,7 +1554,7 @@ async def get_person_detail(person_id: str):
         
         try:
             person['risk_factors'] = json.loads(person.get('risk_factors') or '[]')
-            person['ner_entities'] = json.loads(person.get('ner_entities') or '{}')
+            person['phi_entities'] = json.loads(person.get('phi_entities') or '{}')
             person['extracted_features'] = json.loads(person.get('extracted_features') or '{}')
         except:
             pass
@@ -1712,14 +1712,14 @@ async def send_custom_notification(request: NotificationRequest):
         try:
             if isinstance(person_dict.get('risk_factors'), str):
                 person_dict['risk_factors'] = json.loads(person_dict['risk_factors']) if person_dict['risk_factors'] else []
-            if isinstance(person_dict.get('ner_entities'), str):
-                person_dict['ner_entities'] = json.loads(person_dict['ner_entities']) if person_dict['ner_entities'] else {}
+            if isinstance(person_dict.get('phi_entities'), str):
+                person_dict['phi_entities'] = json.loads(person_dict['phi_entities']) if person_dict['phi_entities'] else {}
             if isinstance(person_dict.get('extracted_features'), str):
                 person_dict['extracted_features'] = json.loads(person_dict['extracted_features']) if person_dict['extracted_features'] else {}
         except json.JSONDecodeError as e:
             print(f"JSON 파싱 오류: {e}")
             person_dict['risk_factors'] = []
-            person_dict['ner_entities'] = {}
+            person_dict['phi_entities'] = {}
             person_dict['extracted_features'] = {}
         
         person = MissingPerson(**person_dict)
@@ -2045,9 +2045,9 @@ async def force_update():
         if not raw_data_list:
             return {"status": "error", "message": "Safe182 API에서 데이터를 가져올 수 없습니다"}
         
-        processed_data = await send_to_ner_server(raw_data_list)
+        processed_data = await send_to_phi_server(raw_data_list)
         if not processed_data:
-            return {"status": "error", "message": "NER 서버에서 데이터 처리에 실패했습니다"}
+            return {"status": "error", "message": "Phi 서버에서 데이터 처리에 실패했습니다"}
         
         existing_ids = get_existing_person_ids()
         new_count = 0
@@ -2094,7 +2094,7 @@ async def health_check():
     except:
         db_status = "unhealthy"
     
-    ner_status = "healthy" if await check_ner_server() else "unhealthy"
+    Phi_status = "healthy" if await check_phi_server() else "unhealthy"
     firebase_status = "healthy" if firebase_messaging else "unhealthy"
     
     return {
@@ -2102,7 +2102,7 @@ async def health_check():
         "timestamp": datetime.now().isoformat(),
         "components": {
             "database": db_status,
-            "ner_server": ner_status,
+            "Phi_server": Phi_status,
             "firebase": firebase_status,
             "api_manager": "healthy"
         },
@@ -2542,7 +2542,7 @@ if __name__ == "__main__":
     print("대전 이동 안전망 시스템을 시작합니다")
     print("=" * 50)
     print("포트: 8001")
-    print("먼저 ner_server.py (포트 8000)가 실행되어 있는지 확인하세요")
+    print("먼저 Phi_server.py (포트 8000)가 실행되어 있는지 확인하세요")
     print(f"카카오 API 키 설정 상태: {'설정됨' if KAKAO_JAVASCRIPT_KEY else '미설정'}")
     print(f"Firebase 설정 상태: {'설정됨' if FIREBASE_CREDENTIALS else '미설정'}")
     print(f"ITS CCTV API 설정 상태: {'설정됨' if ITS_CCTV_API_KEY else '미설정'}")

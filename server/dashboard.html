@@ -1266,7 +1266,7 @@
                         <button class="test-btn" onclick="createTestToken()">테스트 토큰 생성</button>
                         <button class="test-btn" onclick="forceUpdate()">수동 업데이트</button>
                         <button class="test-btn" onclick="initKakaoMap()">카카오맵 초기화</button>
-                        <button class="test-btn" onclick="checkNERServer()">NER 서버 확인</button>
+                        <button class="test-btn" onclick="checkPhiServer()">Phi 서버 확인</button>
                     </div>
                 </div>
                 
@@ -1278,8 +1278,8 @@
                             <span>메인 서버 (포트 8001)</span>
                         </div>
                         <div class="server-item">
-                            <span class="server-indicator" id="nerServerStatus"></span>
-                            <span>NER 서버 (포트 8000)</span>
+                            <span class="server-indicator" id="phiServerStatus"></span>
+                            <span>Phi 서버 (포트 8000)</span>
                         </div>
                         <div class="server-item">
                             <span class="server-indicator" id="firebaseServerStatus"></span>
@@ -1339,7 +1339,7 @@
     <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=YOUR_KAKAO_API_KEY&libraries=services"></script>
     <script>
         const API_BASE_URL = 'http://localhost:8001';
-        const NER_API_URL = 'http://localhost:8000';
+        const PHI_API_URL = 'http://localhost:8000';
         
         function switchTab(tabName) {
             document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
@@ -1759,7 +1759,7 @@
                 this.selectedPerson = null;
                 this.selectedDriver = null;
                 this.isConnected = false;
-                this.nerServerConnected = false;
+                this.phiServerConnected = false;
                 this.map = null;
                 this.geocoder = null;
                 this.markers = [];
@@ -1923,18 +1923,18 @@
                     const mainResponse = await fetch(`${API_BASE_URL}/api/statistics`);
                     const mainStatus = mainResponse.ok;
                     this.updateServerIndicator('mainServerStatus', mainStatus);
-                    
-                    const nerResponse = await fetch(`${NER_API_URL}/api/health`);
-                    const nerStatus = nerResponse.ok;
-                    this.updateServerIndicator('nerServerStatus', nerStatus);
-                    this.nerServerConnected = nerStatus;
-                    
+
+                    const phiResponse = await fetch(`${PHI_API_URL}/api/health`);
+                    const phiStatus = phiResponse.ok;
+                    this.updateServerIndicator('phiServerStatus', phiStatus);
+                    this.phiServerConnected = phiStatus;
+
                     this.updateServerIndicator('firebaseServerStatus', this.isConnected);
                     
                 } catch (error) {
                     console.error('서버 상태 확인 오류:', error);
                     this.updateServerIndicator('mainServerStatus', false);
-                    this.updateServerIndicator('nerServerStatus', false);
+                    this.updateServerIndicator('phiServerStatus', false);
                     this.updateServerIndicator('firebaseServerStatus', false);
                 }
             }
@@ -3235,22 +3235,22 @@
             }
         }
         
-        async function checkNERServer() {
+        async function checkPhiServer() {
             const btn = event.target;
             btn.classList.add('loading');
             btn.textContent = '확인 중...';
             
             try {
-                const response = await fetch(`${NER_API_URL}/api/health`);
+                const response = await fetch(`${PHI_API_URL}/api/health`);
                 const data = await response.json();
-                admin.showResult('NER 서버 상태', data);
-                admin.showToast('NER 서버 연결 확인됨', 'success');
+                admin.showResult('Phi 서버 상태', data);
+                admin.showToast('Phi 서버 연결 확인됨', 'success');
             } catch (error) {
-                admin.showToast(`NER 서버 연결 실패: ${error.message}`, 'error');
-                admin.showResult('NER 서버 오류', { error: error.message, note: 'ner_server.py를 먼저 실행해주세요 (포트 8000)' });
+                admin.showToast(`Phi 서버 연결 실패: ${error.message}`, 'error');
+                admin.showResult('Phi 서버 오류', { error: error.message, note: 'phi_server.py를 먼저 실행해주세요 (포트 8000)' });
             } finally {
                 btn.classList.remove('loading');
-                btn.textContent = 'NER 서버 확인';
+                btn.textContent = 'Phi 서버 확인';
             }
         }
         

@@ -1,123 +1,65 @@
+# migrate_db.py (새 파일 생성)
 import sqlite3
-import os
 
-def reset_database():
-    db_path = 'missing_persons.db'
-    
-    print("=" * 80)
-    print("데이터베이스 초기화")
-    print("=" * 80)
-    
-    if not os.path.exists(db_path):
-        print(f"\n⚠️ 데이터베이스 파일이 없습니다: {db_path}")
-        print("서버를 먼저 실행해서 데이터베이스를 생성하세요.")
-        return
-    
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT COUNT(*) FROM missing_persons WHERE status = 'ACTIVE'")
-        before_count = cursor.fetchone()[0]
-        
-        print(f"\n현재 활성 실종자: {before_count}명")
-        print("\n데이터베이스를 초기화합니다...")
-        print("(모든 실종자 데이터가 삭제됩니다)")
-        
-        response = input("\n계속하시겠습니까? (yes/no): ")
-        if response.lower() != 'yes':
-            print("\n취소되었습니다.")
-            conn.close()
-            return
-        
-        cursor.execute("DELETE FROM missing_persons")
-        conn.commit()
-        
-        cursor.execute("SELECT COUNT(*) FROM missing_persons")
-        after_count = cursor.fetchone()[0]
-        
-        conn.close()
-        
-        print(f"\n✅ 데이터베이스 초기화 완료")
-        print(f"삭제된 레코드: {before_count}개")
-        print(f"현재 레코드: {after_count}개")
-        print("\n다음 단계:")
-        print("1. 서버를 재시작하세요")
-        print("2. 관리자 대시보드에서 '수동 업데이트' 버튼을 클릭하세요")
-        print("3. Safe182에서 최신 데이터를 다시 가져옵니다")
-        
-    except sqlite3.Error as e:
-        print(f"\n❌ 데이터베이스 오류: {e}")
-    except Exception as e:
-        print(f"\n❌ 오류: {e}")
+conn = sqlite3.connect('missing_persons.db')
+cursor = conn.cursor()
 
-def view_database():
-    db_path = 'missing_persons.db'
-    
-    print("=" * 80)
-    print("데이터베이스 내용 확인")
-    print("=" * 80)
-    
-    if not os.path.exists(db_path):
-        print(f"\n⚠️ 데이터베이스 파일이 없습니다: {db_path}")
-        return
-    
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            SELECT id, name, age, gender, location, created_at, status 
-            FROM missing_persons 
-            WHERE status = 'ACTIVE'
-            ORDER BY created_at DESC
-        """)
-        
-        persons = cursor.fetchall()
-        
-        print(f"\n활성 실종자: {len(persons)}명\n")
-        
-        if persons:
-            for idx, person in enumerate(persons, 1):
-                person_id, name, age, gender, location, created_at, status = person
-                print(f"[{idx}] {name} ({age}세, {gender})")
-                print(f"    위치: {location}")
-                print(f"    등록: {created_at}")
-                print(f"    ID: {person_id[:16]}...")
-                print()
-        else:
-            print("등록된 실종자가 없습니다.")
-        
-        conn.close()
-        
-    except sqlite3.Error as e:
-        print(f"\n❌ 데이터베이스 오류: {e}")
+# 기존 테이블 백업
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS missing_persons_backup AS 
+    SELECT * FROM missing_persons
+''')
 
-if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "reset":
-            reset_database()
-        elif sys.argv[1] == "view":
-            view_database()
-        else:
-            print("사용법:")
-            print("  python db_manager.py view   - 데이터베이스 내용 확인")
-            print("  python db_manager.py reset  - 데이터베이스 초기화")
-    else:
-        print("=" * 80)
-        print("데이터베이스 관리 도구")
-        print("=" * 80)
-        print("\n1. 데이터베이스 내용 확인")
-        print("2. 데이터베이스 초기화")
-        print("0. 종료")
-        
-        choice = input("\n선택: ")
-        
-        if choice == "1":
-            view_database()
-        elif choice == "2":
-            reset_database()
-        else:
-            print("종료합니다.")
+# 새 테이블 생성 (phi_entities 사용)
+cursor.execute('''
+    CREATE TABLE missing_persons_new (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        age INTEGER,
+        gender TEXT,
+        location TEXT,
+        description TEXT,
+        photo_url TEXT,
+        photo_base64 TEXT,
+        priority TEXT,
+        risk_factors TEXT,
+        phi_entities TEXT,  -- 변경됨!
+        extracted_features TEXT,
+        lat REAL,
+        lng REAL,
+        created_at TEXT,
+        updated_at TEXT,
+        status TEXT,
+        category TEXT,
+        source TEXT DEFAULT 'SAFE182',
+        confidence_score REAL,
+        last_seen TEXT,
+        clothing_description TEXT,
+        medical_condition TEXT,
+        emergency_contact TEXT,
+        approval_status TEXT DEFAULT 'PENDING',
+        rejection_reason TEXT
+    )
+''')
+
+# 데이터 복사 (ner_entities → phi_entities)
+cursor.execute('''
+    INSERT INTO missing_persons_new 
+    SELECT id, name, age, gender, location, description, photo_url, photo_base64,
+           priority, risk_factors, ner_entities, extracted_features, lat, lng,
+           created_at, updated_at, status, category, source, confidence_score,
+           last_seen, clothing_description, medical_condition, emergency_contact,
+           approval_status, rejection_reason
+    FROM missing_persons
+''')
+
+# 기존 테이블 삭제
+cursor.execute('DROP TABLE missing_persons')
+
+# 새 테이블 이름 변경
+cursor.execute('ALTER TABLE missing_persons_new RENAME TO missing_persons')
+
+conn.commit()
+conn.close()
+
+print("마이그레이션 완료!")

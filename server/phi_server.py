@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
 import torch
-from transformers import AutoTokenizer, AutoModelForTokenClassification
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import numpy as np
 
 class RawDataList(BaseModel):
@@ -22,7 +22,7 @@ class ProcessedPerson(BaseModel):
     photo_base64: Optional[str] = None
     priority: str = "MEDIUM"
     risk_factors: List[str] = []
-    ner_entities: Dict[str, List[str]] = {}
+    phi_entities: Dict[str, List[str]] = {}
     extracted_features: Dict[str, List[str]] = {}
     lat: float = 36.5
     lng: float = 127.8
@@ -35,33 +35,36 @@ class MissingPersonAI:
         self.model = None
         self.tokenizer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"Qwen 디바이스: {self.device}")
+        print(f"Phi 디바이스: {self.device}")
         self.load_model()
     
     def load_model(self):
         try:
-            print("Qwen2.5-3B-Instruct 모델 로딩 중...")
-            from transformers import AutoModelForCausalLM
+            print("Phi-3.5-mini-instruct 모델 로딩 중...")
             
             self.tokenizer = AutoTokenizer.from_pretrained(
-                "Qwen/Qwen2.5-3B-Instruct",
+                "microsoft/Phi-3.5-mini-instruct",
                 trust_remote_code=True
             )
+            
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
+                self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
             
             self.model = AutoModelForCausalLM.from_pretrained(
-                "Qwen/Qwen2.5-3B-Instruct",
+                "microsoft/Phi-3.5-mini-instruct",
                 torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
                 device_map="auto",
-                trust_remote_code=True
+                trust_remote_code=True,
+                # attn_implementation="eager"
             )
             
-            print("Qwen 모델 로딩 완료")
+            print("Phi 모델 로딩 완료")
         except Exception as e:
-            print(f"Qwen 모델 로드 실패: {e}")
+            print(f"Phi 모델 로드 실패: {e}")
             self.model = None
     
     def analyze_missing_person(self, description: str, age: Optional[int] = None, gender: Optional[str] = None) -> Dict[str, Any]:
-        """Qwen으로 실종자 정보를 한 번에 분석"""
         if not self.model:
             return self._get_fallback_analysis(age, gender)
         
@@ -78,7 +81,7 @@ class MissingPersonAI:
 
 다음 JSON 형식으로 출력하세요:
 {{
-    "ner_entities": {{
+    "phi_entities": {{
         "diseases": ["질병1", "질병2"],
         "drugs": ["약물"],
         "clothing": ["의류"],
@@ -124,15 +127,23 @@ priority는 다음 중 하나: HIGH, MEDIUM, LOW
                 add_generation_prompt=True
             )
             
-            model_inputs = self.tokenizer([text_input], return_tensors="pt").to(self.device)
+            model_inputs = self.tokenizer(
+                [text_input], 
+                return_tensors="pt",
+                padding=True,
+                truncation=True
+            ).to(self.device)
             
             with torch.no_grad():
                 generated_ids = self.model.generate(
-                    model_inputs.input_ids,
+                    input_ids=model_inputs.input_ids,
+                    attention_mask=model_inputs.attention_mask,
                     max_new_tokens=1024,
                     temperature=0.3,
                     top_p=0.9,
-                    do_sample=True
+                    do_sample=True,
+                    use_cache=False,
+                    pad_token_id=self.tokenizer.pad_token_id
                 )
             
             generated_ids = [
@@ -149,18 +160,17 @@ priority는 다음 중 하나: HIGH, MEDIUM, LOW
             
             result = json.loads(response)
             
-            print(f"Qwen 분석 완료: category={result.get('category')}, priority={result.get('priority')}")
+            print(f"Phi 분석 완료: category={result.get('category')}, priority={result.get('priority')}")
             
             return result
             
         except Exception as e:
-            print(f"Qwen 분석 오류: {e}")
+            print(f"Phi 분석 오류: {e}")
             import traceback
             traceback.print_exc()
             return self._get_fallback_analysis(age, gender)
         
     def translate_to_english(self, korean_text: str) -> str:
-        """한글 의류 설명을 영어 구문으로 번역"""
         if not korean_text or not korean_text.strip():
             return ""
         
@@ -187,130 +197,75 @@ English:"""
                     "role": "system", 
                     "content": "You translate Korean to English. Output only the English translation. No explanations."
                 },
-                {
-                    "role": "user", 
-                    "content": prompt
-                }
+                {"role": "user", "content": prompt}
             ]
             
-            print(f"[번역 요청] {korean_text}")
-            
-            text = self.tokenizer.apply_chat_template(
+            text_input = self.tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
                 add_generation_prompt=True
             )
             
-            model_inputs = self.tokenizer([text], return_tensors="pt").to(self.device)
+            model_inputs = self.tokenizer(
+                [text_input], 
+                return_tensors="pt",
+                padding=True,
+                truncation=True
+            ).to(self.device)
             
             with torch.no_grad():
                 generated_ids = self.model.generate(
-                    **model_inputs,
-                    max_new_tokens=100,
-                    temperature=0.3,
+                    input_ids=model_inputs.input_ids,
+                    attention_mask=model_inputs.attention_mask,
+                    max_new_tokens=128,
+                    temperature=0.1,
                     top_p=0.9,
                     do_sample=True,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id
+                    use_cache=False,
+                    pad_token_id=self.tokenizer.pad_token_id
                 )
             
             generated_ids = [
-                output_ids[len(input_ids):] 
-                for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
             ]
             
-            response = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+            result = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+            result = result.strip()
             
-            english_text = response.strip().split('\n')[0].strip()
-            
-            for prefix in ["English:", "Translation:", "Output:", "Result:", "Korean:", "->", "："]:
-                if english_text.startswith(prefix):
-                    english_text = english_text[len(prefix):].strip()
-            
-            english_text = english_text.replace('"', '').replace("'", '')
-            
-            import re
-            english_text = re.sub(r'\([^)]*\)', '', english_text)
-            english_text = ' '.join(english_text.split())
-            
-            if not english_text or len(english_text) < 3:
-                print(f"⚠️ 번역 결과 없음, 원본 사용")
+            if result and len(result) > 3:
+                print(f"Phi 번역: {korean_text[:30]}... → {result[:50]}...")
+                return result
+            else:
                 return korean_text
-            
-            if "translate" in english_text.lower() or "following" in english_text.lower():
-                print(f"⚠️ 메타 설명 감지, 원본 사용")
-                return korean_text
-            
-            print(f"[번역 결과] {english_text}")
-            
-            return english_text
-            
+                
         except Exception as e:
-            print(f"번역 오류: {e}")
+            print(f"Phi 번역 오류: {e}")
             return korean_text
 
-    def _extract_keywords_from_sentence(self, sentence: str) -> str:
-        """문장에서 키워드만 추출"""
-        import re
-        
-        # 숫자+단위 추출 (178cm, 67kg 등)
-        numbers = re.findall(r'\d+(?:cm|kg|m)', sentence)
-        
-        # 형용사 추출
-        adjectives = []
-        adj_patterns = [
-            r'(slim|slender|muscular|thin|athletic|chubby)',
-            r'(short|long|medium|straight|curly|wavy)\s+hair',
-            r'(black|white|gray|blue|red|green|brown|yellow)\s+\w+',
-        ]
-        for pattern in adj_patterns:
-            matches = re.findall(pattern, sentence, re.IGNORECASE)
-            adjectives.extend(matches if isinstance(matches[0], str) else [' '.join(m) for m in matches])
-        
-        # 명사 추출
-        nouns = []
-        noun_patterns = [
-            r'(hoodie|jacket|shirt|pants|joggers|jeans|dress|skirt)',
-            r'(shoes|sneakers|boots|sandals)',
-            r'(glasses|sunglasses)',
-            r'(bag|backpack)',
-        ]
-        for pattern in noun_patterns:
-            matches = re.findall(pattern, sentence, re.IGNORECASE)
-            nouns.extend(matches)
-        
-        keywords = numbers + adjectives + nouns
-        return ', '.join(keywords) if keywords else sentence
-    
-    def _get_fallback_analysis(self, age: Optional[int] = None, gender: Optional[str] = None) -> Dict[str, Any]:
-        """Qwen 실패 시 기본 분석"""
+    def _get_fallback_analysis(self, age: Optional[int], gender: Optional[str]) -> Dict[str, Any]:
         category = "기타"
         priority = "MEDIUM"
+        risk_factors = []
         
         if age:
             if age <= 8:
                 category = "미취학아동"
                 priority = "HIGH"
-            elif age <= 18:
+                risk_factors.append("어린 나이")
+            elif age <= 13:
                 category = "학령기아동"
+                priority = "HIGH"
+                risk_factors.append("미성년자")
             elif age >= 80:
                 category = "고령자"
                 priority = "HIGH"
+                risk_factors.append("고령")
             elif age >= 65:
                 category = "고령자"
-                priority = "HIGH"
-        
-        risk_factors = []
-        if age:
-            if age >= 80:
-                risk_factors.append("고령자(80세 이상)")
-            elif age >= 65:
-                risk_factors.append("고령자(65세 이상)")
-            elif age <= 10:
-                risk_factors.append("어린이(10세 이하)")
+                priority = "MEDIUM"
         
         return {
-            "ner_entities": {},
+            "phi_entities": {},
             "extracted_features": {
                 "basic_info": [f"{age}세" if age else "", gender or ""],
             },
@@ -335,15 +290,14 @@ def process_base64_image(base64_string: str) -> str:
         print(f"이미지 처리 오류: {e}")
         return None
 
-def process_missing_person(raw_data: dict, ner_model: MissingPersonAI) -> ProcessedPerson:
+def process_missing_person(raw_data: dict, phi_model: MissingPersonAI) -> ProcessedPerson:
     import hashlib
     
-    # etcSpfeatr을 주요 설명으로 사용
     description = raw_data.get("etcSpfeatr", "") or ""
     photo_base64 = raw_data.get("tknphotoFile", "") or ""
     
     name = raw_data.get('nm', '이름없음')
-    print(f"NER 서버에서 처리 중: {name}")
+    print(f"Phi 서버에서 처리 중: {name}")
     
     age = None
     try:
@@ -355,12 +309,10 @@ def process_missing_person(raw_data: dict, ner_model: MissingPersonAI) -> Proces
     
     gender = raw_data.get("sexdstnDscd", "")
     
-    # 고유 ID 생성
     unique_key = f"{name}_{age}_{gender}_{raw_data.get('occrde', '')}_{raw_data.get('occrAdres', '')}"
     person_id = raw_data.get("msspsnIdntfccd") or hashlib.md5(unique_key.encode()).hexdigest()
 
-    # etcSpfeatr이 있으면 NER 처리
-    ner_entities = {}
+    phi_entities = {}
     extracted_features = {
         "basic_info": [],
         "appearance": [],
@@ -372,10 +324,10 @@ def process_missing_person(raw_data: dict, ner_model: MissingPersonAI) -> Proces
         "additional": []
     }
     
-    print(f"Qwen으로 분석 중: {name}")
-    analysis = ner_model.analyze_missing_person(description, age, gender)
+    print(f"Phi로 분석 중: {name}")
+    analysis = phi_model.analyze_missing_person(description, age, gender)
 
-    ner_entities = analysis.get("ner_entities", {})
+    phi_entities = analysis.get("phi_entities", {})
     extracted_features = analysis.get("extracted_features", {})
     risk_factors = analysis.get("risk_factors", [])
     category = analysis.get("category", "기타")
@@ -387,10 +339,9 @@ def process_missing_person(raw_data: dict, ner_model: MissingPersonAI) -> Proces
         etcSpfeatr_lines = [line.strip() for line in description.split('\n') if line.strip()]
         extracted_features["추가정보"].extend(etcSpfeatr_lines)
     
-    # 사진 처리
     photo_url = None
-    print(f"[디버그] 사진 데이터 길이: {len(photo_base64) if photo_base64 else 0}")  # 여기 추가
-    print(f"[디버그] 사진 데이터 시작 문자: {photo_base64[:20] if photo_base64 and len(photo_base64) > 20 else 'NONE'}")  # 여기 추가
+    print(f"[디버그] 사진 데이터 길이: {len(photo_base64) if photo_base64 else 0}")
+    print(f"[디버그] 사진 데이터 시작 문자: {photo_base64[:20] if photo_base64 and len(photo_base64) > 20 else 'NONE'}")
 
     if photo_base64 and len(photo_base64) > 50:
         try:
@@ -402,14 +353,13 @@ def process_missing_person(raw_data: dict, ner_model: MissingPersonAI) -> Proces
                 photo_url = f"data:image/png;base64,{photo_base64}"
             else:
                 photo_url = f"data:image/jpeg;base64,{photo_base64}"
-            print(f"[디버그] photo_url 생성 성공: {len(photo_url) if photo_url else 0}자")  # 여기 추가
+            print(f"[디버그] photo_url 생성 성공: {len(photo_url) if photo_url else 0}자")
         except Exception as e:
             print(f"사진 처리 오류: {e}")
             photo_url = None
     else:
         print(f"[디버그] 사진 데이터 없음 또는 너무 짧음")
     
-    # 최종 description 생성 (화면 표시용)
     final_description = description if description else f"{age}세 {gender}"
     
     return ProcessedPerson(
@@ -423,13 +373,13 @@ def process_missing_person(raw_data: dict, ner_model: MissingPersonAI) -> Proces
         photo_base64=photo_base64,
         priority=priority,
         risk_factors=risk_factors,
-        ner_entities=ner_entities,
+        phi_entities=phi_entities,
         extracted_features=extracted_features,
         category=category,
         created_at=datetime.now().isoformat()
     )
 
-app = FastAPI(title="QWEN 서버")
+app = FastAPI(title="Phi 서버")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -438,13 +388,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ner_model = MissingPersonAI()
+phi_model = MissingPersonAI()
 
 @app.post("/api/translate")
 async def translate_korean_to_english(request: TranslateRequest):
-    """한글을 영어로 번역"""
     try:
-        translation = ner_model.translate_to_english(request.text)
+        translation = phi_model.translate_to_english(request.text)
         return {
             "success": True,
             "original": request.text,
@@ -457,33 +406,33 @@ async def translate_korean_to_english(request: TranslateRequest):
 @app.post("/api/process_missing_persons")
 async def process_missing_persons_endpoint(request: RawDataList):
     try:
-        print(f"NER 서버: {len(request.raw_data_list)}명의 실종자 데이터 처리 시작")
+        print(f"Phi 서버: {len(request.raw_data_list)}명의 실종자 데이터 처리 시작")
         
         processed_persons = []
         for raw_data in request.raw_data_list:
-            processed_person = process_missing_person(raw_data, ner_model)
+            processed_person = process_missing_person(raw_data, phi_model)
             processed_persons.append(processed_person.model_dump())
         
-        print(f"NER 서버: {len(processed_persons)}명의 데이터 처리 완료")
+        print(f"Phi 서버: {len(processed_persons)}명의 데이터 처리 완료")
         return processed_persons
         
     except Exception as e:
-        print(f"NER 처리 오류: {e}")
-        raise HTTPException(status_code=500, detail=f"NER 처리 실패: {str(e)}")
+        print(f"Phi 처리 오류: {e}")
+        raise HTTPException(status_code=500, detail=f"Phi 처리 실패: {str(e)}")
 
 @app.get("/api/health")
 async def health_check():
     return {
         "status": "healthy",
-        "model_loaded": ner_model.model is not None,
+        "model_loaded": phi_model.model is not None,
         "timestamp": datetime.now().isoformat()
     }
 
 @app.get("/")
 async def root():
-    return {"message": "NER 처리 서버가 실행 중입니다", "port": 8000}
+    return {"message": "Phi 처리 서버가 실행 중입니다", "port": 8000}
 
 if __name__ == "__main__":
     import uvicorn
-    print("NER 서버를 시작합니다 (포트 8000)")
+    print("Phi 서버를 시작합니다 (포트 8000)")
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
