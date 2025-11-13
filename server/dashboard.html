@@ -647,7 +647,6 @@
         .heatmap-controls input[type="range"] {
             width: 100%;
             margin-top: 5px;
-            -webkit-appearance: none;
             height: 6px;
             border-radius: 3px;
             background: #ddd;
@@ -655,7 +654,6 @@
         }
 
         .heatmap-controls input[type="range"]::-webkit-slider-thumb {
-            -webkit-appearance: none;
             appearance: none;
             width: 16px;
             height: 16px;
@@ -1125,38 +1123,31 @@
             
             <div id="cctv-tab" class="tab-content">
                 <div class="sidebar-section">
-                    <h2 class="section-title">실종자 선택</h2>
+                    <h2 class="section-title">실종자별 CCTV 관제</h2>
                     <div class="form-group">
-                        <select class="form-select" id="cctvPersonSelect" onchange="admin.selectPerson(this.value); if(this.value) admin.showToast('실종자를 선택했습니다. 아래에서 CCTV를 검색하세요.', 'success');">
+                        <label class="form-label">실종자 선택</label>
+                        <select class="form-select" id="cctvPersonSelect" onchange="loadPersonCCTVs()">
                             <option value="">실종자를 선택하세요</option>
                         </select>
                     </div>
+                    <div id="cctvSearchInfo" style="display: none; margin-top: 1rem; padding: 1rem; background: #f0f9ff; border-radius: 8px; border-left: 4px solid #3b82f6;">
+                        <div id="cctvSearchRadius" style="font-size: 0.9rem; color: #1e40af; font-weight: 600; margin-bottom: 0.5rem;"></div>
+                        <div id="cctvCount" style="font-size: 0.85rem; color: #1e40af; margin-bottom: 1rem;"></div>
+                        <button onclick="openFullScreenCCTV()" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 1rem; box-shadow: 0 4px 6px rgba(102, 126, 234, 0.4); transition: all 0.2s;" 
+                                onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 12px rgba(102, 126, 234, 0.5)';"
+                                onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px rgba(102, 126, 234, 0.4)';">
+                            전체 보기 (관제실 모드)
+                        </button>
+                    </div>
                 </div>
                 
-                <div class="sidebar-section">
-                    <h2 class="section-title">주변 CCTV 검색</h2>
-                    <div class="form-group">
-                        <label class="form-label">검색 반경</label>
-                        <select class="form-select" id="cctvRadius">
-                            <option value="500">500m</option>
-                            <option value="1000" selected>1km</option>
-                            <option value="2000">2km</option>
-                            <option value="5000">5km</option>
-                        </select>
-                    </div>
-                    <button class="btn btn-secondary" onclick="searchNearbyCCTVs()">주변 CCTV 검색</button>
-                    
-                    <div class="person-list" id="cctvList" style="margin-top: 1rem;">
-                        <div style="text-align: center; padding: 2rem; color: #9ca3af;">
-                            실종자를 선택하고 CCTV를 검색하세요.
+                <div class="content-area" style="padding: 1.5rem; overflow-y: auto;">
+                    <div id="cctvGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 1.5rem;">
+                        <div style="text-align: center; padding: 4rem 2rem; color: #9ca3af; grid-column: 1/-1;">
+                            <div style="font-size: 3rem; margin-bottom: 1rem;">📹</div>
+                            <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">실종자를 선택하세요</div>
+                            <div style="font-size: 0.9rem;">선택한 실종자 주변의 모든 CCTV가 표시됩니다</div>
                         </div>
-                    </div>
-                </div>
-                
-                <div class="sidebar-section">
-                    <h2 class="section-title">CCTV 실시간 영상</h2>
-                    <div id="cctvDetail" style="padding: 1rem; background: #f8fafc; border-radius: 8px; min-height: 100px;">
-                        <p style="text-align: center; color: #9ca3af;">CCTV를 선택하면 실시간 영상이 표시됩니다.</p>
                     </div>
                 </div>
             </div>
@@ -1297,6 +1288,10 @@
                             <input type="checkbox" id="showDrivers" checked onchange="admin.toggleDriverVisibility()">
                             기사 위치 표시
                         </label>
+                        <label>
+                            <input type="checkbox" id="showCCTVs" checked onchange="admin.toggleCCTVMarkers()">
+                            CCTV 위치 표시
+                        </label>
                         <div style="margin-top: 8px;">
                             <label style="font-size: 0.8rem; color: #64748b; display: block; margin-bottom: 4px;">히트맵 투명도 (max 70%)</label>
                             <input type="range" id="heatmapOpacity" min="0.01" max="0.7" step="0.01" value="0.15" onchange="admin.updateHeatmapOpacity()">
@@ -1335,7 +1330,7 @@
             <div id="personDetailContent"></div>
         </div>
     </div>
-
+    console.log("✅ dashboard.html 최신버전 로드됨");
     <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=YOUR_KAKAO_API_KEY&libraries=services"></script>
     <script>
         const API_BASE_URL = 'http://localhost:8001';
@@ -1348,11 +1343,398 @@
             document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
             document.getElementById(`${tabName}-tab`).classList.add('active');
             
-            // 실종자 신고 탭 클릭 시 데이터 로드
             if (tabName === 'reports') {
                 loadPendingReports();
                 loadApprovedPersons();
+            } else if (tabName === 'cctv') {
+                loadCCTVPersonList();
             }
+        }
+
+        function loadCCTVPersonList() {
+            const select = document.getElementById('cctvPersonSelect');
+            const persons = admin.getAllPersons();
+            
+            select.innerHTML = '<option value="">실종자를 선택하세요</option>';
+            persons.forEach(person => {
+                const option = document.createElement('option');
+                option.value = person.id;
+                option.textContent = `${person.name} (${person.age}세, ${person.gender})`;
+                select.appendChild(option);
+            });
+        }
+
+        function loadPersonCCTVs() {
+            const select = document.getElementById('cctvPersonSelect');
+            const personId = select.value;
+            
+            if (!personId) {
+                document.getElementById('cctvSearchInfo').style.display = 'none';
+                document.getElementById('cctvGrid').innerHTML = `
+                    <div style="text-align: center; padding: 4rem 2rem; color: #9ca3af; grid-column: 1/-1;">
+                        <div style="font-size: 3rem; margin-bottom: 1rem;">📹</div>
+                        <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">실종자를 선택하세요</div>
+                        <div style="font-size: 0.9rem;">선택한 실종자 주변의 모든 CCTV가 표시됩니다</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            const person = admin.getPersonById(personId);
+            if (!person || !person.lat || !person.lng) {
+                admin.showToast('실종자의 위치 정보가 없습니다', 'error');
+                return;
+            }
+            
+            const radius = getSearchRadius(person.category);
+            
+            document.getElementById('cctvSearchInfo').style.display = 'block';
+            document.getElementById('cctvSearchRadius').textContent = `수색 반경: ${radius}m`;
+            document.getElementById('cctvCount').textContent = 'CCTV 검색 중...';
+            
+            document.getElementById('cctvGrid').innerHTML = `
+                <div style="text-align: center; padding: 4rem 2rem; color: #9ca3af; grid-column: 1/-1;">
+                    <div class="spinner" style="margin: 0 auto 1rem;"></div>
+                    <div>CCTV를 검색하고 있습니다...</div>
+                </div>
+            `;
+            
+            fetch(`${API_BASE_URL}/api/search_cctv`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    lat: parseFloat(person.lat),
+                    lng: parseFloat(person.lng),
+                    radius: radius
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('cctvCount').textContent = `검색된 CCTV: ${data.count}개`;
+                displayCCTVGrid(data.cctvs);
+                
+                admin.addActivity({
+                    time: new Date().toLocaleTimeString(),
+                    content: `${person.name} 주변 CCTV ${data.count}개 표시`
+                });
+            })
+            .catch(error => {
+                console.error('CCTV 로드 오류:', error);
+                admin.showToast('CCTV를 불러오는데 실패했습니다', 'error');
+                document.getElementById('cctvGrid').innerHTML = `
+                    <div style="text-align: center; padding: 4rem 2rem; color: #ef4444; grid-column: 1/-1;">
+                        <div style="font-size: 3rem; margin-bottom: 1rem;">⚠️</div>
+                        <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">오류 발생</div>
+                        <div style="font-size: 0.9rem;">CCTV를 불러올 수 없습니다</div>
+                    </div>
+                `;
+            });
+        }
+
+        function displayCCTVGrid(cctvs) {
+            const grid = document.getElementById('cctvGrid');
+            
+            if (!cctvs || cctvs.length === 0) {
+                grid.innerHTML = `
+                    <div style="text-align: center; padding: 4rem 2rem; color: #9ca3af; grid-column: 1/-1;">
+                        <div style="font-size: 3rem; margin-bottom: 1rem;">🔍</div>
+                        <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">주변에 CCTV가 없습니다</div>
+                        <div style="font-size: 0.9rem;">검색 범위를 확대하거나 다른 실종자를 선택해주세요</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            grid.innerHTML = cctvs.map(cctv => `
+                <div style="background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: transform 0.2s, box-shadow 0.2s;" 
+                    onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 12px rgba(0,0,0,0.15)';" 
+                    onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px rgba(0,0,0,0.1)';">
+                    
+                    <div style="width: 100%; height: 320px; background: #000; overflow: hidden; position: relative;">
+                        <iframe 
+                            src="${cctv.stream_url}" 
+                            style="width: 100%; height: 100%; border: none; display: block;" 
+                            scrolling="no"
+                            allowfullscreen>
+                        </iframe>
+                    </div>
+                    
+                    <div style="padding: 16px; background: linear-gradient(to bottom, #f8fafc, #ffffff);">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <h3 style="font-size: 1.1rem; font-weight: 700; color: #1e293b; margin: 0;">${cctv.name}</h3>
+                            <span style="font-size: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 4px 10px; border-radius: 12px; font-weight: 600;">UTIC</span>
+                        </div>
+                        
+                        <div style="font-size: 13px; color: #64748b; margin-bottom: 8px; display: flex; align-items: start; gap: 8px;">
+                            <span style="flex-shrink: 0;">📍</span>
+                            <span style="line-height: 1.4;">${cctv.address || '위치 정보 없음'}</span>
+                        </div>
+                        
+                        <div style="font-size: 12px; color: #94a3b8; font-family: monospace; margin-bottom: 12px;">
+                            ${cctv.coords.lat.toFixed(5)}, ${cctv.coords.lng.toFixed(5)}
+                        </div>
+                        
+                        <div style="padding-top: 12px; border-top: 1px solid #e5e7eb; font-size: 10px; color: #94a3b8; text-align: center;">
+                            경찰청 도시교통정보센터(UTIC) 제공
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getSearchRadius(category) {
+            const radiusMap = {
+                '061': 1600,
+                '062': 3840,
+                '063': 8000,
+                '미취학아동': 1600,
+                '학령기아동': 1600,
+                '치매환자': 3840,
+                '성인가출': 8000
+            };
+            return radiusMap[category] || 2000;
+        }
+
+        function loadCCTVPersonList() {
+            const select = document.getElementById('cctvPersonSelect');
+            const persons = admin.getAllPersons();
+            
+            select.innerHTML = '<option value="">실종자를 선택하세요</option>';
+            persons.forEach(person => {
+                const option = document.createElement('option');
+                option.value = person.id;
+                option.textContent = `${person.name} (${person.age}세, ${person.gender})`;
+                select.appendChild(option);
+            });
+        }
+
+        let currentCCTVs = [];
+
+        function loadPersonCCTVs() {
+            const select = document.getElementById('cctvPersonSelect');
+            const personId = select.value;
+            
+            if (!personId) {
+                document.getElementById('cctvSearchInfo').style.display = 'none';
+                document.getElementById('cctvGrid').innerHTML = `
+                    <div style="text-align: center; padding: 4rem 2rem; color: #9ca3af; grid-column: 1/-1;">
+                        <div style="font-size: 3rem; margin-bottom: 1rem;">📹</div>
+                        <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">실종자를 선택하세요</div>
+                        <div style="font-size: 0.9rem;">선택한 실종자 주변의 모든 CCTV가 표시됩니다</div>
+                    </div>
+                `;
+                currentCCTVs = [];
+                return;
+            }
+            
+            const person = admin.getPersonById(personId);
+            if (!person || !person.lat || !person.lng) {
+                admin.showToast('실종자의 위치 정보가 없습니다', 'error');
+                return;
+            }
+            
+            const radius = getSearchRadius(person.category);
+            
+            document.getElementById('cctvSearchInfo').style.display = 'block';
+            document.getElementById('cctvSearchRadius').textContent = `수색 반경: ${radius}m`;
+            document.getElementById('cctvCount').textContent = 'CCTV 검색 중...';
+            
+            document.getElementById('cctvGrid').innerHTML = `
+                <div style="text-align: center; padding: 4rem 2rem; color: #9ca3af; grid-column: 1/-1;">
+                    <div class="spinner" style="margin: 0 auto 1rem;"></div>
+                    <div>CCTV를 검색하고 있습니다...</div>
+                </div>
+            `;
+            
+            fetch(`${API_BASE_URL}/api/search_cctv`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    lat: parseFloat(person.lat),
+                    lng: parseFloat(person.lng),
+                    radius: radius
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                currentCCTVs = data.cctvs || [];
+                document.getElementById('cctvCount').textContent = `검색된 CCTV: ${data.count}개`;
+                displayCCTVGrid(currentCCTVs);
+                
+                admin.addActivity({
+                    time: new Date().toLocaleTimeString(),
+                    content: `${person.name} 주변 CCTV ${data.count}개 표시`
+                });
+            })
+            .catch(error => {
+                console.error('CCTV 로드 오류:', error);
+                admin.showToast('CCTV를 불러오는데 실패했습니다', 'error');
+                currentCCTVs = [];
+                document.getElementById('cctvGrid').innerHTML = `
+                    <div style="text-align: center; padding: 4rem 2rem; color: #ef4444; grid-column: 1/-1;">
+                        <div style="font-size: 3rem; margin-bottom: 1rem;">⚠️</div>
+                        <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">오류 발생</div>
+                        <div style="font-size: 0.9rem;">CCTV를 불러올 수 없습니다</div>
+                    </div>
+                `;
+            });
+        }
+
+        function openFullScreenCCTV() {
+            if (!currentCCTVs || currentCCTVs.length === 0) {
+                admin.showToast('표시할 CCTV가 없습니다', 'error');
+                return;
+            }
+            
+            const count = currentCCTVs.length;
+            let cols, rows;
+            
+            if (count <= 4) {
+                cols = 2;
+                rows = Math.ceil(count / 2);
+            } else if (count <= 9) {
+                cols = 3;
+                rows = Math.ceil(count / 3);
+            } else if (count <= 16) {
+                cols = 4;
+                rows = Math.ceil(count / 4);
+            } else {
+                cols = 5;
+                rows = Math.ceil(count / 5);
+            }
+            
+            const popup = window.open('', 'CCTV전체관제', 'width=1920,height=1080,fullscreen=yes');
+            
+            const gridItems = currentCCTVs.map(cctv => `
+                <div style="background: #1e293b; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; height: 100%;">
+                    <div style="flex: 1; background: #000; position: relative; min-height: 0; overflow: hidden;">
+                        <iframe 
+                            src="${cctv.stream_url}" 
+                            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none;" 
+                            scrolling="no"
+                            allowfullscreen>
+                        </iframe>
+                    </div>
+                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 6px 10px; font-weight: 600; font-size: 0.75rem; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
+                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${cctv.name}</span>
+                        <span style="font-size: 8px; background: rgba(255,255,255,0.25); padding: 2px 6px; border-radius: 8px; margin-left: 8px; flex-shrink: 0;">UTIC</span>
+                    </div>
+                </div>
+            `).join('');
+            
+            popup.document.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>CCTV 통합 관제</title>
+                    <style>
+                        * { margin: 0; padding: 0; box-sizing: border-box; }
+                        body { 
+                            background: #0f172a; 
+                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                            overflow: hidden;
+                            height: 100vh;
+                            display: flex;
+                            flex-direction: column;
+                        }
+                        .header {
+                            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+                            color: white;
+                            padding: 12px 20px;
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                            flex-shrink: 0;
+                        }
+                        .header h1 {
+                            font-size: 1.2rem;
+                            font-weight: 700;
+                        }
+                        .header .info {
+                            font-size: 0.85rem;
+                            opacity: 0.9;
+                        }
+                        .grid-container {
+                            display: grid;
+                            grid-template-columns: repeat(${cols}, 1fr);
+                            grid-template-rows: repeat(${rows}, 1fr);
+                            gap: 8px;
+                            padding: 8px;
+                            flex: 1;
+                            min-height: 0;
+                        }
+                        .footer {
+                            position: fixed;
+                            bottom: 8px;
+                            right: 8px;
+                            background: rgba(0,0,0,0.8);
+                            color: white;
+                            padding: 6px 12px;
+                            border-radius: 16px;
+                            font-size: 10px;
+                            backdrop-filter: blur(10px);
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="header">
+                        <h1>CCTV 통합 관제 시스템</h1>
+                        <div class="info">총 ${count}개 CCTV 실시간 모니터링</div>
+                    </div>
+                    <div class="grid-container">
+                        ${gridItems}
+                    </div>
+                    <div class="footer">경찰청 도시교통정보센터(UTIC) 제공</div>
+                </body>
+                </html>
+            `);
+        }
+
+        function displayCCTVGrid(cctvs) {
+            const grid = document.getElementById('cctvGrid');
+            
+            if (!cctvs || cctvs.length === 0) {
+                grid.innerHTML = `
+                    <div style="text-align: center; padding: 60px; color: #9ca3af; grid-column: 1/-1;">
+                        주변에 CCTV가 없습니다
+                    </div>
+                `;
+                return;
+            }
+            
+            grid.innerHTML = cctvs.map(cctv => `
+                <div style="background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <div style="background: #667eea; color: white; padding: 10px; font-weight: 600; display: flex; justify-content: space-between; align-items: center;">
+                        <span>${cctv.name}</span>
+                        <span style="font-size: 11px; background: rgba(255,255,255,0.2); padding: 3px 8px; border-radius: 4px;">UTIC 제공</span>
+                    </div>
+                    <div style="padding: 10px; background: #000;">
+                        <iframe 
+                            src="${cctv.stream_url}" 
+                            style="width: 100%; height: 280px; border: none;" 
+                            allowfullscreen>
+                        </iframe>
+                    </div>
+                    <div style="padding: 10px; font-size: 12px; color: #666; background: #f8fafc;">
+                        <div><strong>위치:</strong> ${cctv.address}</div>
+                        <div><strong>좌표:</strong> ${cctv.coords.lat.toFixed(4)}, ${cctv.coords.lng.toFixed(4)}</div>
+                        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af;">
+                            경찰청 도시교통정보센터(UTIC) 제공 교통정보
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getSearchRadius(category) {
+            const radiusMap = {
+                '061': 1600,
+                '062': 3840,
+                '063': 8000
+            };
+            return radiusMap[category] || 2000;
         }
         
         function registerDriver() {
@@ -1765,6 +2147,9 @@
                 this.markers = [];
                 this.driverMarkers = [];
                 this.heatmapCircles = [];
+                this.cctvMarkers = []; 
+                this.allCCTVs = [];     
+                this.showCCTVMarkers = true;
                 this.showHeatmap = true;
                 this.showDrivers = true;
                 this.heatmapOpacity = 0.15;
@@ -1946,7 +2331,7 @@
                 }
             }
             
-            initializeKakaoMap() {
+            async initializeKakaoMap() {  // async 추가
                 if (typeof kakao === 'undefined' || !kakao.maps) {
                     this.showToast('카카오맵 API가 로드되지 않았습니다.', 'error');
                     return;
@@ -1978,6 +2363,9 @@
                     });
                     
                     this.showToast('카카오맵이 초기화되었습니다.', 'success');
+                    
+                    await this.loadAllCCTVs();
+                    
                 } catch (error) {
                     this.showToast('카카오맵 초기화 실패: ' + error.message, 'error');
                 }
@@ -2586,9 +2974,13 @@
                     this.ws = new WebSocket(wsUrl);
                     
                     this.ws.onopen = () => {
-                        console.log('WebSocket 연결됨 (포트 8001)');
+                        console.log('WebSocket 연결됨');
                         this.isConnected = true;
                         this.updateConnectionStatus();
+                        
+                        setTimeout(async () => {
+                            await this.loadAllCCTVs();
+                        }, 2000);
                     };
                     
                     this.ws.onmessage = (event) => {
@@ -2709,8 +3101,9 @@
                     this.updatePersonSelect();
                     this.updateStats();
                     
-                    setTimeout(() => {
+                    setTimeout(async () => {
                         this.updateMapMarkers();
+                        await this.loadAllCCTVs();
                     }, 1000);
                     
                 } catch (error) {
@@ -3101,6 +3494,168 @@
                     'delivery': '배달'
                 };
                 return types[type] || type;
+            }
+            
+            getPersonById(personId) {
+                return this.persons.find(p => p.id === personId);
+            }
+
+            getAllPersons() {
+                return this.persons.filter(p => p.status === 'ACTIVE');
+            }
+
+            async loadAllCCTVs() {
+                console.log("✅ CCTV JS 최신버전 로드됨");
+                try {
+                    console.log('전체 CCTV 로드 시작...');
+                    const response = await fetch(`${API_BASE_URL}/api/all_cctvs`);
+                    console.log("응답 상태:", response.status);
+                    const text = await response.text();
+                    console.log("응답 원문:", text.slice(0, 200)); // 맨 앞 200자만
+                    const data = JSON.parse(text);
+                    this.allCCTVs = data.cctvs || [];
+                    console.log(`CCTV ${this.allCCTVs.length}개 로드됨`);
+                    this.displayCCTVMarkers();
+                } catch (error) {
+                    console.error('전체 CCTV 로드 오류:', error);
+                }
+            }
+
+            displayCCTVMarkers() {
+                console.log("=== CCTV 마커 표시 시도 ===");
+                console.log("지도 객체:", this.map);
+                console.log("전체 CCTV 배열 타입:", Array.isArray(this.allCCTVs));
+                console.log("CCTV 개수:", this.allCCTVs?.length);
+                console.log("첫 좌표:", this.allCCTVs?.[0]?.coords);
+                    
+                if (!this.map) {
+                    console.log('지도가 아직 초기화되지 않음');
+                    return;
+                }
+
+                this.clearCCTVMarkers();
+
+                if (!this.showCCTVMarkers) {
+                    console.log('CCTV 마커 표시 꺼짐');
+                    return;
+                }
+
+                console.log(`CCTV 마커 표시 시작: ${this.allCCTVs.length}개`);
+                console.log("로드된 CCTV 예시:", this.allCCTVs[0]);
+
+                // ✅ 여기서 coords 매핑 보정 (혹시 구조 다를 때 대비)
+                this.allCCTVs = this.allCCTVs.map(c => ({
+                    ...c,
+                    coords: c.coords || { lat: c.YCOORD, lng: c.XCOORD }
+                }));
+
+                this.allCCTVs.forEach(cctv => {
+                    if (!cctv.coords || cctv.coords.lat == null || cctv.coords.lng == null) return;
+
+                    // 🔥 좌표 순서 바꿔서 찍기
+                    const markerPosition = new kakao.maps.LatLng(cctv.coords.lat, cctv.coords.lng);
+                    // ↓ 그래도 안 뜨면 아래처럼 순서 바꿔서 한번 더 시도
+                    // const markerPosition = new kakao.maps.LatLng(cctv.coords.lng, cctv.coords.lat);
+
+                    function btoaUTF8(str) {
+                        return window.btoa(unescape(encodeURIComponent(str)));
+                    }
+
+                    const markerImage = new kakao.maps.MarkerImage(
+                        'data:image/svg+xml;base64,' + btoaUTF8(`
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+                                <circle cx="16" cy="16" r="14" fill="#4338ca" stroke="white" stroke-width="2"/>
+                                <text x="16" y="21" text-anchor="middle" fill="white" font-size="16">📹</text>
+                            </svg>
+                        `),
+                        new kakao.maps.Size(32, 32)
+                    );
+
+                    const marker = new kakao.maps.Marker({
+                        position: markerPosition,
+                        map: this.map,
+                        image: markerImage,
+                        title: cctv.name
+                    });
+
+                    const infoContent = `
+                        <div style="padding: 12px; min-width: 220px; max-width: 300px;">
+                            <div style="font-weight: 700; margin-bottom: 10px; color: #1e293b; font-size: 14px;">${cctv.name}</div>
+                            <div style="font-size: 12px; color: #64748b; margin-bottom: 10px;">${cctv.address || '주소 정보 없음'}</div>
+                            <button onclick="admin.openCCTVPopup('${cctv.id}')"
+                                    style="width: 100%; padding: 8px 12px; background: linear-gradient(135deg, #4338ca 0%, #6366f1 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;">
+                                실시간 영상 보기
+                            </button>
+                        </div>
+                    `;
+
+                    const infowindow = new kakao.maps.InfoWindow({
+                        content: infoContent,
+                        removable: true
+                    });
+
+                    kakao.maps.event.addListener(marker, 'click', () => {
+                        infowindow.open(this.map, marker);
+                    });
+
+                    this.cctvMarkers.push(marker);
+                });
+
+                console.log(`✅ CCTV 마커 ${this.cctvMarkers.length}개 생성 완료`);
+
+                if (this.cctvMarkers.length > 0) {
+                    const bounds = new kakao.maps.LatLngBounds();
+                    this.cctvMarkers.forEach(marker => bounds.extend(marker.getPosition()));
+                    this.map.setBounds(bounds);
+                    console.log("지도 중심 자동 조정 완료 ✅");
+                } else {
+                    console.warn("⚠️ 생성된 마커가 없습니다.");
+                }
+
+            }
+
+            clearCCTVMarkers() {
+                this.cctvMarkers.forEach(marker => marker.setMap(null));
+                this.cctvMarkers = [];
+            }
+
+            toggleCCTVMarkers() {
+                this.showCCTVMarkers = !this.showCCTVMarkers;
+                if (this.showCCTVMarkers) {
+                    this.displayCCTVMarkers();
+                } else {
+                    this.clearCCTVMarkers();
+                }
+            }
+
+            openCCTVPopup(cctvId) {
+                const cctv = this.allCCTVs.find(c => c.id === cctvId);
+                if (!cctv) return;
+                
+                const popup = window.open('', 'CCTV영상', 'width=640,height=520');
+                popup.document.write(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8">
+                        <title>${cctv.name}</title>
+                        <style>
+                            body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+                            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; font-weight: 600; }
+                            .video-container { width: 100%; height: calc(100vh - 100px); }
+                            iframe { width: 100%; height: 100%; border: none; }
+                            .info { background: #1e293b; color: white; padding: 10px 15px; font-size: 12px; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="header">${cctv.name}</div>
+                        <div class="video-container">
+                            <iframe src="${cctv.stream_url}" allowfullscreen></iframe>
+                        </div>
+                        <div class="info">경찰청 도시교통정보센터(UTIC) 제공 교통정보</div>
+                    </body>
+                    </html>
+                `);
             }
         }
         

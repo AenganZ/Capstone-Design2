@@ -9,3 +9,4 @@ firebase_key.json
 /models
 /tmp
 server/models/*.onnx
+/templates

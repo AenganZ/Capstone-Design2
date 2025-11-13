@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional, Union
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Body, Query, Depends
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, validator
@@ -270,6 +270,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+os.makedirs("static", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 manager = ConnectionManager()
 api_manager = OptimizedAPIManager()
 
@@ -910,51 +912,55 @@ def original_for_log(original, cleaned):
     return f"{original} -> {cleaned}"
 
 async def fetch_cctv_data(lat: float, lng: float, radius: int):
-    if not ITS_CCTV_API_KEY:
-        log_system_event("WARNING", "CCTV_API", "API 키가 설정되지 않았습니다")
-        return []
+    UTIC_CCTV_URL = "https://www.utic.go.kr/map/mapcctv.do"
     
-    delta = radius / 100000.0
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Referer": "https://www.utic.go.kr/map/map.do?menu=cctv",
+        "X-Requested-With": "XMLHttpRequest",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    }
     
-    async with httpx.AsyncClient() as client:
-        params = {
-            "apiKey": ITS_CCTV_API_KEY,
-            "type": "its",
-            "cctvType": "1",
-            "minX": lng - delta,
-            "maxX": lng + delta,
-            "minY": lat - delta,
-            "maxY": lat + delta,
-            "getType": "json"
-        }
-        
-        print(f"CCTV API 요청: {params}")
-        
-        try:
+    data = {
+        "cctvSearchCondition": "E07001",
+        "type": "E"
+    }
+    
+    try:
+        async with httpx.AsyncClient(verify=False) as client:
             start_time = time.time()
-            response = await client.get(ITS_CCTV_URL, params=params, timeout=30.0)
+            response = await client.post(UTIC_CCTV_URL, headers=headers, data=data, timeout=15.0)
             response_time = time.time() - start_time
             
-            print(f"CCTV API 응답 코드: {response.status_code}")
-            
             if response.status_code == 200:
-                data = response.json()
-                print(f"CCTV API 응답 데이터: {json.dumps(data, ensure_ascii=False)[:500]}")
-                result = data.get("response", {}).get("data", [])
-                print(f"CCTV 개수: {len(result)}")
-                await log_api_request("CCTV_API", "GET", len(result), True, response_time)
-                return result
+                cctvs = response.json()
+                daejeon_cctvs = [c for c in cctvs if c.get("CENTERNAME") == "대전교통정보센터"]
+                
+                nearby_cctvs = []
+                for cctv in daejeon_cctvs:
+                    try:
+                        cctv_lat = float(cctv.get("YCOORD", 0))
+                        cctv_lng = float(cctv.get("XCOORD", 0))
+                        
+                        distance = ((cctv_lat - lat) ** 2 + (cctv_lng - lng) ** 2) ** 0.5 * 111000
+                        
+                        if distance <= radius:
+                            nearby_cctvs.append(cctv)
+                    except (ValueError, TypeError):
+                        continue
+                
+                print(f"대전 CCTV {len(daejeon_cctvs)}개 중 반경 {radius}m 내 {len(nearby_cctvs)}개 검색 완료")
+                await log_api_request("UTIC_CCTV", "POST", len(nearby_cctvs), True, response_time)
+                return nearby_cctvs
             else:
-                error_text = response.text[:200]
-                print(f"CCTV API 오류 응답: {error_text}")
-                await log_api_request("CCTV_API", "GET", 0, False, response_time, f"HTTP {response.status_code}")
+                await log_api_request("UTIC_CCTV", "POST", 0, False, response_time, f"HTTP {response.status_code}")
                 return []
                 
-        except Exception as e:
-            print(f"CCTV API 예외: {e}")
-            await log_api_request("CCTV_API", "GET", 0, False, 0, str(e))
-            log_system_event("ERROR", "CCTV_API", f"요청 실패: {e}")
-            return []
+    except Exception as e:
+        print(f"UTIC CCTV API 오류: {e}")
+        await log_api_request("UTIC_CCTV", "POST", 0, False, 0, str(e))
+        log_system_event("ERROR", "UTIC_CCTV", f"요청 실패: {e}")
+        return []
 
 async def fetch_weather_data(lat: float, lng: float):
     if not OPENWEATHER_API_KEY:
@@ -1772,21 +1778,34 @@ async def search_cctv(request: CCTVRequest):
         
         processed_cctvs = []
         for cctv in cctv_data:
+            cctv_id = cctv.get("CCTVID", "")
+            cctv_name = cctv.get("CCTVNAME", "CCTV")
+            kind = cctv.get("KIND", "E")
+            ip = cctv.get("CCTVIP", "")
+            ch = cctv.get("CH", "")
+            cid = cctv.get("ID", "")
+            passwd = cctv.get("PASSWD", "")
+            
+            stream_url = (
+                f"https://www.utic.go.kr/jsp/map/cctvStream.jsp?"
+                f"cctvid={cctv_id}&cctvname={cctv_name}"
+                f"&kind={kind}&cctvip={ip}&cctvch={ch}"
+                f"&id={cid}&cctvpasswd={passwd}"
+            )
+            
             processed_cctv = {
-                "id": cctv.get("roadsectionid", f"cctv_{len(processed_cctvs)}"),
-                "name": cctv.get("cctvname", "CCTV"),
-                "address": f"{cctv.get('coordy', '')}, {cctv.get('coordx', '')}",
+                "id": cctv_id,
+                "name": cctv_name,
+                "address": cctv.get("LOCATION", ""),
                 "distance": 0,
-                "status": "정상" if cctv.get("cctvresolution") else "점검중",
-                "type": cctv.get("cctvtype", "교통감시"),
-                "operator": "한국도로공사",
-                "stream_url": cctv.get("cctvurl", ""),
+                "status": "정상",
+                "type": "교통감시",
+                "operator": "대전교통정보센터",
+                "stream_url": stream_url,
                 "coords": {
-                    "lat": float(cctv.get("coordy", 0)),
-                    "lng": float(cctv.get("coordx", 0))
-                },
-                "resolution": cctv.get("cctvresolution", ""),
-                "format": cctv.get("cctvformat", "")
+                    "lat": float(cctv.get("YCOORD", 0)),
+                    "lng": float(cctv.get("XCOORD", 0))
+                }
             }
             processed_cctvs.append(processed_cctv)
         
@@ -2518,9 +2537,79 @@ async def delete_sighting_report(report_id: int):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/api/all_cctvs")
+async def get_all_cctvs():
+    UTIC_CCTV_URL = "https://www.utic.go.kr/map/mapcctv.do"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Referer": "https://www.utic.go.kr/map/map.do?menu=cctv",
+        "X-Requested-With": "XMLHttpRequest",
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    }
+    
+    data = {
+        "cctvSearchCondition": "E07001",
+        "type": "E"
+    }
+    
+    try:
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.post(UTIC_CCTV_URL, headers=headers, data=data, timeout=15.0)
+            
+            if response.status_code == 200:
+                cctvs = response.json()
+                daejeon_cctvs = [c for c in cctvs if c.get("CENTERNAME") == "대전교통정보센터"]
+                
+                processed_cctvs = []
+                for cctv in daejeon_cctvs:
+                    cctv_id = cctv.get("CCTVID", "")
+                    cctv_name = cctv.get("CCTVNAME", "CCTV")
+                    kind = cctv.get("KIND", "E")
+                    ip = cctv.get("CCTVIP", "")
+                    ch = cctv.get("CH", "")
+                    cid = cctv.get("ID", "")
+                    passwd = cctv.get("PASSWD", "")
+                    
+                    stream_url = (
+                        f"https://www.utic.go.kr/jsp/map/cctvStream.jsp?"
+                        f"cctvid={cctv_id}&cctvname={cctv_name}"
+                        f"&kind={kind}&cctvip={ip}&cctvch={ch}"
+                        f"&id={cid}&cctvpasswd={passwd}"
+                    )
+                    
+                    try:
+                        lat = float(cctv.get("YCOORD", 0))
+                        lng = float(cctv.get("XCOORD", 0))
+                        if lat and lng:
+                            processed_cctvs.append({
+                                "id": cctv_id,
+                                "name": cctv_name,
+                                "address": cctv.get("LOCATION", ""),
+                                "stream_url": stream_url,
+                                "coords": {"lat": lat, "lng": lng}
+                            })
+                    except (ValueError, TypeError):
+                        continue
+                
+                return {"cctvs": processed_cctvs, "count": len(processed_cctvs)}
+            else:
+                return {"cctvs": [], "count": 0}
+                
+    except Exception as e:
+        print(f"전체 CCTV 로드 오류: {e}")
+        return {"cctvs": [], "count": 0}
+    
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse("static/favicon.ico")
 
 @app.get("/")
 async def get_admin_dashboard():
+    import os
+    print("📁 현재 작업 디렉터리:", os.getcwd())
+    
     if not KAKAO_JAVASCRIPT_KEY:
         print("경고: KAKAO_JAVASCRIPT_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.")
         kakao_key = "YOUR_KAKAO_API_KEY"
@@ -2532,10 +2621,10 @@ async def get_admin_dashboard():
             html_content = f.read()
         
         html_content = html_content.replace("YOUR_KAKAO_API_KEY", kakao_key)
-        
         return HTMLResponse(html_content)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="dashboard.html 파일을 찾을 수 없습니다")
+
 
 if __name__ == "__main__":
     import uvicorn
