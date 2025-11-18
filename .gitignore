@@ -10,3 +10,5 @@ firebase_key.json
 /tmp
 server/models/*.onnx
 /templates
+/server/movement_predictor_model_v2
+/server/dataset_daejeon_gpt_v2.jsonl

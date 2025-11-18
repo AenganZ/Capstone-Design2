@@ -190,15 +190,38 @@ class MissingPersonImageGenerator:
     
     def translate_description_to_english(self, korean_desc: str) -> str:
         try:
-            response = requests.post(
-                'http://localhost:8000/api/translate',
-                json={"text": korean_desc},
-                timeout=30
-            )
-            if response.status_code == 200:
-                return response.json().get("translation", korean_desc)
-        except:
-            pass
+            # 이미 영어면 그대로 반환
+            if not korean_desc or all(ord(c) < 128 for c in korean_desc if c.isalpha()):
+                return korean_desc
+            deepl_key = os.getenv("DEEPL_API_KEY", "")
+        
+            if deepl_key and deepl_key != "":
+                try:
+                    print(f"[DeepL] 번역 시도: {korean_desc}")
+                    
+                    deepl_response = requests.post(
+                        "https://api-free.deepl.com/v2/translate",
+                        data={
+                            "auth_key": deepl_key,
+                            "text": korean_desc,
+                            "source_lang": "KO",
+                            "target_lang": "EN-US"
+                        },
+                        timeout=10
+                    )
+                    
+                    if deepl_response.status_code == 200:
+                        translated = deepl_response.json()["translations"][0]["text"]
+                        print(f"[DeepL] 번역 완료: {translated}")
+                        return translated
+                    else:
+                        print(f"[DeepL] 오류: {deepl_response.status_code}")
+                
+                except Exception as e:
+                    print(f"[DeepL] 실패: {e}")
+        except Exception as e:
+            print(f"[번역] 실패: {e}, 원문 사용")
+        
         return korean_desc
     
     def generate_missing_person_image(
@@ -228,14 +251,25 @@ class MissingPersonImageGenerator:
             print("\n2단계: 긴 프롬프트 생성")
             
             english_desc = self.translate_description_to_english(description)
+            english_desc_modified = english_desc
+
+            # "후드티" → "hoodie (hood down, not worn)"
+            if "hoodie" in english_desc.lower() or "후드" in description:
+                english_desc_modified = english_desc_modified.replace("hoodie", "hoodie (hood down, not worn)")
+                english_desc_modified += ", hood is not worn"
+            
+            # "모자" 감지
+            if any(word in description for word in ["모자", "캡", "비니"]):
+                english_desc_modified += ", not wearing the hat/cap"
             
             print(f"[번역된 설명] {english_desc}")
+            print(f"[보정된 설명] {english_desc_modified}")
             
             gender_en = "male" if gender == "남성" else "female"
             
             prompt = f"""professional full body portrait photograph,
 Korean {gender_en} person, {age} years old,
-{english_desc},
+{english_desc_modified},
 standing is not allowed.
 seated on a simple backless stool (seat height 45–50cm), slight anterior pelvic tilt.
 camera at eye level to the torso (navel to chest height), 70–100mm lens, distance ~3–4m to avoid distortion.
@@ -246,7 +280,8 @@ hands resting lightly on thighs, fingers naturally separated; detailed hands (na
 plain white seamless background; clean studio lighting; soft key 45° camera-left, gentle rim light; fill -1EV; even professional exposure; sharp focus; photorealistic fashion lookbook.
 trousers show realistic fabric drape and subtle knee folds; hem sits lightly on shoes; socks minimal and unobtrusive.
 shoes fully visible (uppers and a hint of outsole), no perspective exaggeration.
-cap/logo minimal without readable text."""
+cap/logo minimal without readable text.
+hood must not be worn, hood down."""
             
             negative_prompt = """portrait only, headshot, close-up, upper body only, half body, cropped, cut off, cut feet, cut shoes,
 standing pose, crouching, squatting, lying down, kneeling, bent over,
@@ -265,6 +300,7 @@ hood up, hood worn, hood forward, hood visible around the head, hood framing the
 hood touching/overlapping/covering the cap or brim, hood covering ears,
 hood casting shadow onto the cap,
 wearing the hood when wearing a hoodie (hood must not be worn),
+wearing hat, wearing cap, wearing beanie, hat on head, cap on head,
 beanie when baseball cap requested, knit cap when baseball cap requested,
 baseball cap when beanie requested, curved brim when beanie requested,
 wrong hat type, incorrect headwear"""

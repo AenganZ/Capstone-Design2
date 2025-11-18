@@ -590,21 +590,24 @@
         
         .toast {
             position: fixed;
-            top: 90px;
-            right: 20px;
+            top: 0.5%;
+            left: 50%;
+            transform: translateX(-50%) scale(0.9);
+            opacity: 0;
             background: white;
             border-left: 4px solid #10b981;
             padding: 1rem 1.5rem;
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             z-index: 1100;
-            transform: translateX(100%);
-            transition: transform 0.3s ease;
-            max-width: 300px;
+            transition: all 0.3s ease;
+            max-width: 400px;
+            min-width: 300px;
         }
-        
+
         .toast.show {
-            transform: translateX(0);
+            transform: translate(-50%) scale(1);
+            opacity: 1;
         }
         
         .toast.error {
@@ -1142,7 +1145,7 @@
                 </div>
                 
                 <div class="content-area" style="padding: 1.5rem; overflow-y: auto;">
-                    <div id="cctvGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 1.5rem;">
+                    <div id="cctvGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(370px, 1fr)); gap: 1.5rem;">
                         <div style="text-align: center; padding: 4rem 2rem; color: #9ca3af; grid-column: 1/-1;">
                             <div style="font-size: 3rem; margin-bottom: 1rem;">📹</div>
                             <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem;">실종자를 선택하세요</div>
@@ -1189,7 +1192,7 @@
             </div>
             <!-- 목격 신고 탭 -->
             <div id="sighting-tab" class="tab-content">
-                <div class="content-area">
+                <div class="content-area" style="padding-left: 2rem; padding-right: 2rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; margin-top: 16px;">
                         <select id="reportStatusFilter" onchange="loadSightingReports(this.value)" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px;">
                             <option value="all">전체</option>
@@ -1252,12 +1255,9 @@
                     <div class="test-buttons">
                         <button class="test-btn" onclick="testAPI()">API 테스트</button>
                         <button class="test-btn" onclick="testFirebase()">Firebase 테스트</button>
-                        <button class="test-btn" onclick="testTokens()">토큰 목록</button>
                         <button class="test-btn" onclick="testStatistics()">통계 확인</button>
-                        <button class="test-btn" onclick="createTestToken()">테스트 토큰 생성</button>
                         <button class="test-btn" onclick="forceUpdate()">수동 업데이트</button>
                         <button class="test-btn" onclick="initKakaoMap()">카카오맵 초기화</button>
-                        <button class="test-btn" onclick="checkPhiServer()">Phi 서버 확인</button>
                     </div>
                 </div>
                 
@@ -1267,10 +1267,6 @@
                         <div class="server-item">
                             <span class="server-indicator" id="mainServerStatus"></span>
                             <span>메인 서버 (포트 8001)</span>
-                        </div>
-                        <div class="server-item">
-                            <span class="server-indicator" id="phiServerStatus"></span>
-                            <span>Phi 서버 (포트 8000)</span>
                         </div>
                         <div class="server-item">
                             <span class="server-indicator" id="firebaseServerStatus"></span>
@@ -1330,11 +1326,9 @@
             <div id="personDetailContent"></div>
         </div>
     </div>
-    console.log("✅ dashboard.html 최신버전 로드됨");
     <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=YOUR_KAKAO_API_KEY&libraries=services"></script>
     <script>
         const API_BASE_URL = 'http://localhost:8001';
-        const PHI_API_URL = 'http://localhost:8000';
         
         function switchTab(tabName) {
             document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
@@ -1446,35 +1440,27 @@
             }
             
             grid.innerHTML = cctvs.map(cctv => `
-                <div style="background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: transform 0.2s, box-shadow 0.2s;" 
+                <div style="background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); transition: transform 0.2s, box-shadow 0.2s; display: flex; flex-direction: column;" 
                     onmouseover="this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 12px rgba(0,0,0,0.15)';" 
                     onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 4px 6px rgba(0,0,0,0.1)';">
                     
-                    <div style="width: 100%; height: 320px; background: #000; overflow: hidden; position: relative;">
+                    <div style="width: 100%; aspect-ratio: 16/9; background: #000; overflow: hidden; position: relative;">
                         <iframe 
                             src="${cctv.stream_url}" 
+                            loading="eager"
                             style="width: 100%; height: 100%; border: none; display: block;" 
                             scrolling="no"
                             allowfullscreen>
                         </iframe>
                     </div>
                     
-                    <div style="padding: 16px; background: linear-gradient(to bottom, #f8fafc, #ffffff);">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                            <h3 style="font-size: 1.1rem; font-weight: 700; color: #1e293b; margin: 0;">${cctv.name}</h3>
-                            <span style="font-size: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 4px 10px; border-radius: 12px; font-weight: 600;">UTIC</span>
-                        </div>
-                        
-                        <div style="font-size: 13px; color: #64748b; margin-bottom: 8px; display: flex; align-items: start; gap: 8px;">
-                            <span style="flex-shrink: 0;">📍</span>
-                            <span style="line-height: 1.4;">${cctv.address || '위치 정보 없음'}</span>
-                        </div>
-                        
-                        <div style="font-size: 12px; color: #94a3b8; font-family: monospace; margin-bottom: 12px;">
+                    <div style="padding: 10px 12px; background: #4a5568; flex-shrink: 0;">
+                        <div style="color: #60a5fa; font-size: 0.9rem; font-weight: 600; margin-bottom: 4px;">${cctv.name}</div>
+                        <div style="font-size: 11px; color: #cbd5e0;">${cctv.address || '위치 정보 없음'}</div>
+                        <div style="font-size: 10px; color: #a0aec0; font-family: monospace; margin-top: 2px; margin-bottom: 6px;">
                             ${cctv.coords.lat.toFixed(5)}, ${cctv.coords.lng.toFixed(5)}
                         </div>
-                        
-                        <div style="padding-top: 12px; border-top: 1px solid #e5e7eb; font-size: 10px; color: #94a3b8; text-align: center;">
+                        <div style="font-size: 9px; color: #94a3b8; opacity: 0.8; padding-top: 6px; border-top: 1px solid rgba(203, 213, 224, 0.2);">
                             경찰청 도시교통정보센터(UTIC) 제공
                         </div>
                     </div>
@@ -1606,18 +1592,15 @@
             const popup = window.open('', 'CCTV전체관제', 'width=1920,height=1080,fullscreen=yes');
             
             const gridItems = currentCCTVs.map(cctv => `
-                <div style="background: #1e293b; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; height: 100%;">
-                    <div style="flex: 1; background: #000; position: relative; min-height: 0; overflow: hidden;">
-                        <iframe 
-                            src="${cctv.stream_url}" 
-                            style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none;" 
-                            scrolling="no"
-                            allowfullscreen>
-                        </iframe>
-                    </div>
-                    <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 6px 10px; font-weight: 600; font-size: 0.75rem; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
-                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${cctv.name}</span>
-                        <span style="font-size: 8px; background: rgba(255,255,255,0.25); padding: 2px 6px; border-radius: 8px; margin-left: 8px; flex-shrink: 0;">UTIC</span>
+                <div style="background: #000; border-radius: 8px; overflow: hidden; position: relative; height: 100%;">
+                    <iframe 
+                        src="${cctv.stream_url}" 
+                        style="width: 100%; height: 100%; border: none; display: block;" 
+                        scrolling="no"
+                        allowfullscreen>
+                    </iframe>
+                    <div style="position: absolute; top: 0; left: 0; right: 0; background: rgba(74, 85, 104, 0.9); padding: 8px 12px; backdrop-filter: blur(5px);">
+                        <div style="color: #60a5fa; font-size: 0.85rem; font-weight: 600;">${cctv.name}</div>
                     </div>
                 </div>
             `).join('');
@@ -1706,10 +1689,6 @@
             
             grid.innerHTML = cctvs.map(cctv => `
                 <div style="background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                    <div style="background: #667eea; color: white; padding: 10px; font-weight: 600; display: flex; justify-content: space-between; align-items: center;">
-                        <span>${cctv.name}</span>
-                        <span style="font-size: 11px; background: rgba(255,255,255,0.2); padding: 3px 8px; border-radius: 4px;">UTIC 제공</span>
-                    </div>
                     <div style="padding: 10px; background: #000;">
                         <iframe 
                             src="${cctv.stream_url}" 
@@ -1717,10 +1696,11 @@
                             allowfullscreen>
                         </iframe>
                     </div>
-                    <div style="padding: 10px; font-size: 12px; color: #666; background: #f8fafc;">
-                        <div><strong>위치:</strong> ${cctv.address}</div>
-                        <div><strong>좌표:</strong> ${cctv.coords.lat.toFixed(4)}, ${cctv.coords.lng.toFixed(4)}</div>
-                        <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af;">
+                    <div style="padding: 10px 12px; background: #4a5568;">
+                        <div style="color: #60a5fa; font-size: 0.9rem; font-weight: 600; margin-bottom: 4px;">${cctv.name}</div>
+                        <div style="font-size: 11px; color: #cbd5e0;">${cctv.address || '위치 정보 없음'}</div>
+                        <div style="font-size: 10px; color: #a0aec0; font-family: monospace; margin-top: 2px;">
+                            ${cctv.coords.lat.toFixed(5)}, ${cctv.coords.lng.toFixed(5)}
                             경찰청 도시교통정보센터(UTIC) 제공 교통정보
                         </div>
                     </div>
@@ -2141,7 +2121,6 @@
                 this.selectedPerson = null;
                 this.selectedDriver = null;
                 this.isConnected = false;
-                this.phiServerConnected = false;
                 this.map = null;
                 this.geocoder = null;
                 this.markers = [];
@@ -2154,6 +2133,8 @@
                 this.showDrivers = true;
                 this.heatmapOpacity = 0.15;
                 this.personVisibility = {};
+                this.movementPredictions = [];
+                this.movementOverlays = [];
                 
                 this.SEARCH_RADIUS_BY_CATEGORY = {
                     '미취학아동': 1600,
@@ -2271,6 +2252,205 @@
                 return this.SEARCH_DESCRIPTIONS[category] || this.SEARCH_DESCRIPTIONS['기타'];
             }
 
+            async getPredictionFromAI(person, lat, lng) {
+                try {
+                    console.log('환경 데이터 가져오는 중...');
+                    
+                    // 1. 먼저 환경 데이터 가져오기
+                    const envResponse = await fetch('http://localhost:8001/api/get_environment', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ lat: lat, lon: lng })
+                    });
+                    
+                    let environment = {
+                        north: {road_type: "이차로", land_use: "주거지역", poi: ["없음"], hazard: ["없음"], slope: "평지"},
+                        east: {road_type: "이차로", land_use: "주거지역", poi: ["없음"], hazard: ["없음"], slope: "평지"},
+                        south: {road_type: "이차로", land_use: "주거지역", poi: ["없음"], hazard: ["없음"], slope: "평지"},
+                        west: {road_type: "이차로", land_use: "주거지역", poi: ["없음"], hazard: ["없음"], slope: "평지"}
+                    };
+                    
+                    if (envResponse.ok) {
+                        const envData = await envResponse.json();
+                        if (envData.success) {
+                            environment = envData.environment;
+                            console.log('✅ 실제 환경 데이터:', environment);
+                        }
+                    } else {
+                        console.log('환경 데이터 실패, 기본값 사용');
+                    }
+                    
+                    // 2. AI 예측 요청
+                    console.log('AI 예측 요청 중...');
+                    const response = await fetch('http://localhost:8002/api/predict_movement', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            person: {
+                                category: person.category || '기타',
+                                age: person.age || 30,
+                                sex: person.gender === '남' ? 'M' : (person.gender === '여' ? 'F' : 'M'),
+                                time_of_day: '낮',
+                                time_since_missing_hour: 2.0,
+                                walking_ability: '보통'
+                            },
+                            environment: environment,  // 실제 환경 데이터 사용
+                            lat: lat,
+                            lon: lng
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.success) {
+                            console.log('AI 예측 성공:', data.prediction);
+                            return data.prediction;
+                        }
+                    }
+                    console.log('AI 예측 실패');
+                    return null;
+                    
+                } catch (error) {
+                    console.error('AI 예측 오류:', error);
+                    return null;
+                }
+            }
+            
+            clearMovementArrows() {
+                this.movementOverlays.forEach(overlay => overlay.setMap(null));
+                this.movementOverlays = [];
+            }
+            
+            async drawMovementArrows(person, lat, lng) {
+                this.clearMovementArrows();
+                
+                if (!this.map || !lat || !lng) return;
+                
+                console.log('🎯 화살표 그리기:', person.name, lat, lng);
+                
+                const prediction = await this.getPredictionFromAI(person, lat, lng);
+                
+                if (!prediction) {
+                    console.log('❌ 예측 데이터 없음');
+                    return;
+                }
+                
+                const directions = {
+                    'north': { angle: 0, offsetLat: 0.005, offsetLng: 0 },
+                    'east': { angle: 90, offsetLat: 0, offsetLng: 0.005 },
+                    'south': { angle: 180, offsetLat: -0.005, offsetLng: 0 },
+                    'west': { angle: 270, offsetLat: 0, offsetLng: -0.005 }
+                };
+                
+                const directionNames = {
+                    'north': '북쪽',
+                    'east': '동쪽',
+                    'south': '남쪽',
+                    'west': '서쪽'
+                };
+                
+                if (this.movementOverlays && this.movementOverlays.length > 0) {
+                    this.movementOverlays.forEach(overlay => overlay.setMap(null));
+                    this.movementOverlays = [];
+                }
+
+                Object.entries(prediction).forEach(([direction, data]) => {
+                    const dir = directions[direction];
+                    if (!dir) return;
+                    
+                    const arrowLat = lat + dir.offsetLat;
+                    const arrowLng = lng + dir.offsetLng;
+                    const position = new kakao.maps.LatLng(arrowLat, arrowLng);
+                    
+                    const probability = data.prob;
+                    const reason = data.reason;
+                    
+                    const arrowSize = 40 + (probability / 100) * 20;
+                    const arrowColor = probability >= 30 ? '#ef4444' : probability >= 20 ? '#f59e0b' : '#3b82f6';
+                    
+                    const content = document.createElement('div');
+                    content.style.cssText = 'position: relative; cursor: pointer; transform-origin: center;';
+                    
+                    content.innerHTML = `
+                        <div class="movement-arrow" style="width: ${arrowSize}px; height: ${arrowSize}px; position: relative; transform: rotate(${dir.angle}deg); filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
+                            <svg width="${arrowSize}" height="${arrowSize}" viewBox="0 0 40 40">
+                                <defs>
+                                    <marker id="arrowhead-${direction}" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                                        <polygon points="0 0, 10 3, 0 6" fill="${arrowColor}" />
+                                    </marker>
+                                </defs>
+                                <line x1="20" y1="35" x2="20" y2="10" stroke="${arrowColor}" stroke-width="3" marker-end="url(#arrowhead-${direction})" />
+                                <circle cx="20" cy="35" r="3" fill="${arrowColor}" />
+                            </svg>
+                            <div style="position: absolute; bottom: -25px; left: 50%; transform: translateX(-50%) rotate(-${dir.angle}deg); background: ${arrowColor}; color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+                                ${probability}%
+                            </div>
+                        </div>
+                        <div class="movement-popup" style="
+                            display: none; 
+                            position: absolute; 
+                            bottom: ${arrowSize + 30}px; 
+                            left: 50%; 
+                            transform: translateX(-50%); 
+                            background: white; 
+                            padding: 10px 14px; 
+                            border-radius: 8px; 
+                            box-shadow: 0 4px 12px rgba(0,0,0,0.15); 
+                            border: 2px solid ${arrowColor}; 
+                            width: 280px; 
+                            z-index: 1000; 
+                            white-space: normal; 
+                            word-wrap: break-word; 
+                            overflow-wrap: break-word; 
+                            overflow: hidden; 
+                            box-sizing: border-box;">
+                            <div style="
+                                font-weight: bold; 
+                                color: #1e293b; 
+                                margin-bottom: 4px; 
+                                font-size: 13px;
+                                white-space: normal;
+                                word-wrap: break-word;">
+                                ${directionNames[direction]} 방향
+                            </div>
+                            <div style="
+                                color: #64748b; 
+                                font-size: 12px; 
+                                line-height: 1.4;
+                                white-space: normal;
+                                word-wrap: break-word;
+                                overflow-wrap: break-word;">
+                                ${reason}
+                            </div>
+                            <div style="position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-top: 8px solid ${arrowColor};"></div>
+                        </div>
+                    `;
+                    
+                    const arrow = content.querySelector('.movement-arrow');
+                    const popup = content.querySelector('.movement-popup');
+                    
+                    arrow.addEventListener('mouseenter', () => {
+                        popup.style.display = 'block';
+                    });
+                    
+                    arrow.addEventListener('mouseleave', () => {
+                        popup.style.display = 'none';
+                    });
+                    
+                    const overlay = new kakao.maps.CustomOverlay({
+                        position: position,
+                        content: content,
+                        yAnchor: 0.5,
+                        xAnchor: 0.5
+                    });
+                    
+                    overlay.setMap(this.map);
+                    this.movementOverlays.push(overlay);
+                });
+                
+                console.log(`✅ 화살표 ${this.movementOverlays.length}개 표시됨`);
+            }
+
             isWaterArea(lat, lng) {
                 if (lat >= 36.32 && lat <= 36.38 && lng >= 127.35 && lng <= 127.40) {
                     if (Math.abs(lng - 127.375) < 0.005) return true;
@@ -2305,22 +2485,12 @@
 
             async checkServerStatus() {
                 try {
-                    const mainResponse = await fetch(`${API_BASE_URL}/api/statistics`);
-                    const mainStatus = mainResponse.ok;
-                    this.updateServerIndicator('mainServerStatus', mainStatus);
-
-                    const phiResponse = await fetch(`${PHI_API_URL}/api/health`);
-                    const phiStatus = phiResponse.ok;
-                    this.updateServerIndicator('phiServerStatus', phiStatus);
-                    this.phiServerConnected = phiStatus;
-
-                    this.updateServerIndicator('firebaseServerStatus', this.isConnected);
-                    
+                    const response = await fetch('http://localhost:8001/api/health');
+                    if (response.ok) {
+                        console.log('✅ 메인 서버 정상');
+                    }
                 } catch (error) {
-                    console.error('서버 상태 확인 오류:', error);
-                    this.updateServerIndicator('mainServerStatus', false);
-                    this.updateServerIndicator('phiServerStatus', false);
-                    this.updateServerIndicator('firebaseServerStatus', false);
+                    console.error('메인 서버 연결 실패:', error);
                 }
             }
 
@@ -2391,6 +2561,7 @@
             async updateMapMarkers() {
                 if (!this.map) return;
                 
+                this.clearMovementArrows();
                 this.clearMarkers();
                 this.clearHeatmap();
                 
@@ -3234,6 +3405,7 @@
                             const coords = new kakao.maps.LatLng(lat, lng);
                             this.map.setCenter(coords);
                             this.map.setLevel(3);
+                            this.drawMovementArrows(person, lat, lng);
                         }
                     }
                 }
@@ -3632,7 +3804,7 @@
                 const cctv = this.allCCTVs.find(c => c.id === cctvId);
                 if (!cctv) return;
                 
-                const popup = window.open('', 'CCTV영상', 'width=640,height=520');
+                const popup = window.open('', 'CCTV영상', 'width=640,height=480');
                 popup.document.write(`
                     <!DOCTYPE html>
                     <html>
@@ -3640,19 +3812,42 @@
                         <meta charset="UTF-8">
                         <title>${cctv.name}</title>
                         <style>
-                            body { margin: 0; padding: 0; background: #000; overflow: hidden; }
-                            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px; font-weight: 600; }
-                            .video-container { width: 100%; height: calc(100vh - 100px); }
-                            iframe { width: 100%; height: 100%; border: none; }
-                            .info { background: #1e293b; color: white; padding: 10px 15px; font-size: 12px; }
+                            * { margin: 0; padding: 0; box-sizing: border-box; }
+                            body { 
+                                background: #000; 
+                                overflow: hidden; 
+                                height: 100vh;
+                                display: flex;
+                                flex-direction: column;
+                            }
+                            .video-container { 
+                                flex: 1;
+                                width: 100%; 
+                                overflow: hidden; 
+                                position: relative;
+                                min-height: 0;
+                            }
+                            iframe { 
+                                width: 100%; 
+                                height: 100%; 
+                                border: none; 
+                                display: block;
+                            }
+                            .info { 
+                                background: #4a5568; 
+                                color: #60a5fa; 
+                                padding: 10px 15px; 
+                                font-size: 14px; 
+                                font-weight: 600;
+                                flex-shrink: 0;
+                            }
                         </style>
                     </head>
                     <body>
-                        <div class="header">${cctv.name}</div>
                         <div class="video-container">
-                            <iframe src="${cctv.stream_url}" allowfullscreen></iframe>
+                            <iframe src="${cctv.stream_url}" loading="eager" allowfullscreen></iframe>
                         </div>
-                        <div class="info">경찰청 도시교통정보센터(UTIC) 제공 교통정보</div>
+                        <div class="info">${cctv.name}</div>
                     </body>
                     </html>
                 `);
@@ -3712,24 +3907,6 @@
             }
         }
         
-        async function testTokens() {
-            const btn = event.target;
-            btn.classList.add('loading');
-            btn.textContent = '확인 중...';
-            
-            try {
-                const response = await fetch(`${API_BASE_URL}/api/test_tokens`);
-                const data = await response.json();
-                admin.showResult('테스트 토큰 목록', data);
-                admin.showToast('토큰 목록 조회 완료', 'success');
-            } catch (error) {
-                admin.showToast(`토큰 조회 실패: ${error.message}`, 'error');
-            } finally {
-                btn.classList.remove('loading');
-                btn.textContent = '토큰 목록';
-            }
-        }
-        
         async function testStatistics() {
             const btn = event.target;
             btn.classList.add('loading');
@@ -3745,26 +3922,6 @@
             } finally {
                 btn.classList.remove('loading');
                 btn.textContent = '통계 확인';
-            }
-        }
-        
-        async function createTestToken() {
-            const btn = event.target;
-            btn.classList.add('loading');
-            btn.textContent = '생성 중...';
-            
-            try {
-                const response = await fetch(`${API_BASE_URL}/api/register_test_token`, {
-                    method: 'POST'
-                });
-                const data = await response.json();
-                admin.showResult('테스트 토큰 생성 결과', data);
-                admin.showToast('테스트 토큰 생성 완료', 'success');
-            } catch (error) {
-                admin.showToast(`토큰 생성 실패: ${error.message}`, 'error');
-            } finally {
-                btn.classList.remove('loading');
-                btn.textContent = '테스트 토큰 생성';
             }
         }
         
@@ -3787,25 +3944,6 @@
             } finally {
                 btn.classList.remove('loading');
                 btn.textContent = '수동 업데이트';
-            }
-        }
-        
-        async function checkPhiServer() {
-            const btn = event.target;
-            btn.classList.add('loading');
-            btn.textContent = '확인 중...';
-            
-            try {
-                const response = await fetch(`${PHI_API_URL}/api/health`);
-                const data = await response.json();
-                admin.showResult('Phi 서버 상태', data);
-                admin.showToast('Phi 서버 연결 확인됨', 'success');
-            } catch (error) {
-                admin.showToast(`Phi 서버 연결 실패: ${error.message}`, 'error');
-                admin.showResult('Phi 서버 오류', { error: error.message, note: 'phi_server.py를 먼저 실행해주세요 (포트 8000)' });
-            } finally {
-                btn.classList.remove('loading');
-                btn.textContent = 'Phi 서버 확인';
             }
         }
         
@@ -4161,7 +4299,7 @@
                     const statusText = {
                         'PENDING': '대기중',
                         'REVIEWING': '검토중',
-                        'CONFIRMED': '확인됨 ✓',
+                        'CONFIRMED': '확인됨',
                         'REJECTED': '기각됨'
                     }[report.status] || '대기중';
                     
@@ -4171,71 +4309,76 @@
                         'LOW': '불확실함'
                     }[report.confidence_level] || '보통';
                     
-                    let photoHtml;
-                        if (person.photo_base64) {
-                            let photoSrc = person.photo_base64;
-                            
-                            // data: 접두사가 없으면 추가
-                            if (!photoSrc.startsWith('data:')) {
-                                photoSrc = `data:image/jpeg;base64,${photoSrc}`;
-                            }
-                            
-                            photoHtml = `<img src="${photoSrc}" 
-                                            style="width: 100%; height: 100%; object-fit: cover;"
-                                            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                                        <div style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center; background: #f3f4f6;">
-                                            <i class="fas fa-user" style="color: #9ca3af; font-size: 2rem;"></i>
-                                        </div>`;
-                        } else {
-                            photoHtml = `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #f3f4f6;">
-                                            <i class="fas fa-user" style="color: #9ca3af; font-size: 2rem;"></i>
-                                        </div>`;
+                    let photoHtml = '';
+                    if (report.photo_base64) {
+                        let photoSrc = report.photo_base64;
+                        if (!photoSrc.startsWith('data:')) {
+                            photoSrc = `data:image/jpeg;base64,${photoSrc}`;
                         }
+                        photoHtml = `
+                            <div style="width: 80px; height: 80px; border-radius: 8px; overflow: hidden; flex-shrink: 0; background: #f3f4f6;">
+                                <img src="${photoSrc}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.style.display='none';">
+                            </div>
+                        `;
+                    } else {
+                        photoHtml = `
+                            <div style="width: 80px; height: 80px; border-radius: 8px; display: flex; align-items: center; justify-content: center; background: #f3f4f6; flex-shrink: 0;">
+                                <span style="font-size: 2rem;">👤</span>
+                            </div>
+                        `;
+                    }
                     
-                    const reportTime = new Date(report.created_at).toLocaleString('ko-KR');
+                    const reportTime = report.reported_at ? new Date(report.reported_at).toLocaleString('ko-KR') : '시간 미상';
+                    const personName = report.person_name || '이름 미상';
+                    const reportLat = report.reporter_lat ? report.reporter_lat.toFixed(6) : 'N/A';
+                    const reportLng = report.reporter_lng ? report.reporter_lng.toFixed(6) : 'N/A';
+                    const description = report.description || '설명 없음';
                     
                     return `
-                        <div class="report-card" style="${report.status === 'CONFIRMED' ? 'border: 2px solid #10b981;' : ''}">
-                            <div class="report-header">
-                                <div class="report-person-info">
+                        <div class="report-card" style="background: white; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); ${report.status === 'CONFIRMED' ? 'border: 2px solid #10b981;' : ''}">
+                            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
+                                <div style="display: flex; gap: 12px; flex: 1;">
                                     ${photoHtml}
-                                    <div>
-                                        <div class="report-name">
-                                            ${report.person_name || '이름 미상'}
-                                            <span class="confidence-badge confidence-${report.confidence_level}">
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 700; font-size: 1rem; margin-bottom: 4px; color: #1e293b;">
+                                            ${personName}
+                                            <span style="font-size: 11px; background: #e0e7ff; color: #4338ca; padding: 2px 8px; border-radius: 12px; margin-left: 8px;">
                                                 ${confidenceText}
                                             </span>
                                         </div>
-                                        <div class="report-meta">#${report.id} | ${reportTime}</div>
+                                        <div style="font-size: 12px; color: #64748b;">#${report.id} | ${reportTime}</div>
                                     </div>
                                 </div>
-                                <span class="report-status status-${report.status}">${statusText}</span>
+                                <span style="font-size: 12px; padding: 4px 12px; border-radius: 6px; font-weight: 600; white-space: nowrap;
+                                    ${report.status === 'CONFIRMED' ? 'background: #d1fae5; color: #065f46;' : 
+                                    report.status === 'REVIEWING' ? 'background: #dbeafe; color: #1e40af;' : 
+                                    report.status === 'REJECTED' ? 'background: #fee2e2; color: #991b1b;' : 
+                                    'background: #fef3c7; color: #92400e;'}">
+                                    ${statusText}
+                                </span>
                             </div>
                             
-                            <div class="report-content">
-                                <div style="margin-bottom: 6px;"><strong>위치:</strong> ${report.lat?.toFixed(6) || 'N/A'}, ${report.lng?.toFixed(6) || 'N/A'}</div>
-                                <div><strong>설명:</strong> ${report.description || '없음'}</div>
+                            <div style="background: #f8fafc; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 13px;">
+                                <div style="margin-bottom: 6px;"><strong>위치:</strong> ${reportLat}, ${reportLng}</div>
+                                <div><strong>설명:</strong> ${description}</div>
                             </div>
                             
                             ${report.status === 'PENDING' ? `
-                                <div class="report-actions">
-                                    <button style="background: #6b7280;" onclick="updateReportStatus(${report.id}, 'REVIEWING')">
-                                        <i class="fas fa-search"></i> 검토중
+                                <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                                    <button style="padding: 6px 12px; font-size: 12px; border: none; border-radius: 6px; cursor: pointer; background: #6b7280; color: white;" onclick="updateReportStatus(${report.id}, 'REVIEWING')">
+                                        검토중
                                     </button>
-                                    <button style="background: #10b981;" onclick="confirmReport(${report.id}, '${report.person_name || '이름 미상'}')">
-                                        <i class="fas fa-check-circle"></i> 실종자 발견!
+                                    <button style="padding: 6px 12px; font-size: 12px; border: none; border-radius: 6px; cursor: pointer; background: #10b981; color: white;" onclick="confirmReport(${report.id}, '${personName}')">
+                                        발견 확인
                                     </button>
-                                    <button style="background: #ef4444;" onclick="updateReportStatus(${report.id}, 'REJECTED')">
-                                        <i class="fas fa-times"></i> 기각
-                                    </button>
-                                    <button style="background: #dc2626; margin-left: 8px;" onclick="deleteReport(${report.id})">
-                                        <i class="fas fa-trash"></i> 삭제
+                                    <button style="padding: 6px 12px; font-size: 12px; border: none; border-radius: 6px; cursor: pointer; background: #ef4444; color: white;" onclick="updateReportStatus(${report.id}, 'REJECTED')">
+                                        기각
                                     </button>
                                 </div>
                             ` : `
-                                <div class="report-actions">
-                                    <button style="background: #dc2626;" onclick="deleteReport(${report.id})">
-                                        <i class="fas fa-trash"></i> 삭제
+                                <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                                    <button style="padding: 6px 12px; font-size: 12px; border: none; border-radius: 6px; cursor: pointer; background: #ef4444; color: white;" onclick="deleteReport(${report.id})">
+                                        삭제
                                     </button>
                                 </div>
                             `}
@@ -4244,7 +4387,7 @@
                 }).join('');
                 
             } catch (error) {
-                console.error('오류:', error);
+                console.error('목격 신고 로드 오류:', error);
                 container.innerHTML = '<div style="text-align: center; padding: 40px; color: #ef4444;">불러오기 실패</div>';
             }
         }

@@ -5,6 +5,8 @@ import sqlite3
 import asyncio
 import httpx
 import uuid
+import requests
+import osmnx as ox
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional, Union
@@ -19,12 +21,12 @@ from image_generator import get_generator
 
 load_dotenv()
 
+DEEPL_API_KEY = os.getenv("DEEPL_API_KEY")
 SAFE182_ESNTL_ID = os.getenv("SAFE182_ESNTL_ID", "")
 SAFE182_AUTH_KEY = os.getenv("SAFE182_AUTH_KEY", "")
 KAKAO_API_KEY = os.getenv("KAKAO_API_KEY")
 KAKAO_JAVASCRIPT_KEY = os.getenv("KAKAO_JAVASCRIPT_KEY")
 FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS", "./firebase_key.json")
-PHI_SERVER_URL = os.getenv("PHI_SERVER_URL", "http://localhost:8000")
 ITS_CCTV_API_KEY = os.getenv("ITS_CCTV_API_KEY", "")
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 
@@ -39,7 +41,6 @@ class MissingPerson(BaseModel):
     photo_base64: Optional[str] = None
     priority: str = "MEDIUM"
     risk_factors: List[str] = []
-    phi_entities: Dict[str, List[str]] = {}
     extracted_features: Dict[str, List[str]] = {}
     lat: float = 36.3504
     lng: float = 127.3845
@@ -242,7 +243,6 @@ async def lifespan(app: FastAPI):
     else:
         print("Firebase 사용 불가 - FCM 기능 제한됨")
     
-    await check_phi_server()
     await init_background_tasks()
     
     polling_task = asyncio.create_task(start_optimized_polling())
@@ -280,18 +280,6 @@ KAKAO_GEO = "https://dapi.kakao.com/v2/local/search/address.json"
 ITS_CCTV_URL = "https://openapi.its.go.kr:9443/cctvInfo"
 WEATHER_URL = "https://api.openweathermap.org/data/2.5/weather"
 
-async def check_phi_server():
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(f"{PHI_SERVER_URL}/api/health")
-            if response.status_code == 200:
-                print("Phi 서버 연결 확인됨")
-                return True
-    except Exception as e:
-        print(f"Phi 서버 연결 실패: {e}")
-        print("Phi_server.py를 먼저 실행해주세요")
-    return False
-
 async def init_background_tasks():
     print("백그라운드 작업 초기화 중...")
     await create_indexes()
@@ -306,7 +294,6 @@ async def create_indexes():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_missing_persons_status ON missing_persons(status)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_missing_persons_priority ON missing_persons(priority)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_missing_persons_created_at ON missing_persons(created_at)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_fcm_tokens_active ON fcm_tokens(active)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_notifications_sent_at ON notifications(sent_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_sighting_reports_reported_at ON sighting_reports(reported_at)')
         print("데이터베이스 인덱스 생성 완료")
@@ -338,7 +325,6 @@ async def init_database():
             photo_base64 TEXT,
             priority TEXT,
             risk_factors TEXT,
-            phi_entities TEXT,
             extracted_features TEXT,
             lat REAL,
             lng REAL,
@@ -507,20 +493,27 @@ async def init_database():
     conn.close()
     print("데이터베이스 초기화 및 마이그레이션이 완료되었습니다.")
 
-def log_system_event(level: str, component: str, message: str, data: dict = None):
+def log_system_event(level: str, category: str, message: str, component: str = None):
+    """
+    시스템 로그 저장
+    level: INFO, WARNING, ERROR
+    category: API, POLLING, GEOCODING 등
+    message: 로그 메시지
+    component: 선택적 컴포넌트명
+    """
     try:
         conn = sqlite3.connect('missing_persons.db')
         cursor = conn.cursor()
         
         cursor.execute('''
-            INSERT INTO system_logs (timestamp, level, component, message, data)
+            INSERT INTO system_logs (level, category, component, message, timestamp)
             VALUES (?, ?, ?, ?, ?)
         ''', (
-            datetime.now().isoformat(),
             level,
-            component,
+            category,
+            component or "SYSTEM",
             message,
-            json.dumps(data, ensure_ascii=False) if data else None
+            datetime.now().isoformat()
         ))
         
         conn.commit()
@@ -534,23 +527,25 @@ def save_missing_person(person: MissingPerson):
     
     current_time = datetime.now().isoformat()
     
+    # Safe182 데이터는 자동 승인, REPORTER는 승인 대기
+    approval_status = 'APPROVED' if person.source != 'REPORTER' else 'PENDING'
+    
     cursor.execute('''
         INSERT OR REPLACE INTO missing_persons 
         (id, name, age, gender, location, description, photo_url, photo_base64, 
-         priority, risk_factors, phi_entities, extracted_features, lat, lng, 
+         priority, risk_factors, extracted_features, lat, lng, 
          created_at, updated_at, status, category, source, confidence_score,
-         last_seen, clothing_description, medical_condition, emergency_contact)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         last_seen, clothing_description, medical_condition, emergency_contact, approval_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         person.id, person.name, person.age, person.gender, person.location,
         person.description, person.photo_url, person.photo_base64, person.priority,
         json.dumps(person.risk_factors, ensure_ascii=False),
-        json.dumps(person.phi_entities, ensure_ascii=False),
         json.dumps(person.extracted_features, ensure_ascii=False),
         person.lat, person.lng, person.created_at, current_time, person.status, 
         person.category, person.source, person.confidence_score,
         person.last_seen, person.clothing_description, person.medical_condition,
-        person.emergency_contact
+        person.emergency_contact, approval_status
     ))
     
     conn.commit()
@@ -564,7 +559,7 @@ def get_missing_persons(status: str = "ACTIVE", limit: int = None, offset: int =
     
     query = '''
         SELECT id, name, age, gender, location, description, photo_url, photo_base64,
-               priority, risk_factors, phi_entities, extracted_features, lat, lng,
+               priority, risk_factors, extracted_features, lat, lng,
                created_at, updated_at, status, category, source, confidence_score,
                last_seen, clothing_description, medical_condition, emergency_contact
         FROM missing_persons 
@@ -588,11 +583,9 @@ def get_missing_persons(status: str = "ACTIVE", limit: int = None, offset: int =
         
         try:
             person_dict['risk_factors'] = json.loads(person_dict.get('risk_factors') or '[]')
-            person_dict['phi_entities'] = json.loads(person_dict.get('phi_entities') or '{}')
             person_dict['extracted_features'] = json.loads(person_dict.get('extracted_features') or '{}')
         except json.JSONDecodeError:
             person_dict['risk_factors'] = []
-            person_dict['phi_entities'] = {}
             person_dict['extracted_features'] = {}
         
         persons.append(person_dict)
@@ -666,71 +659,6 @@ async def fetch_safe182_data():
         api_manager.record_error()
         await log_api_request("SAFE182", "POST", 0, False, 0, str(e))
         log_system_event("ERROR", "SAFE182_API", f"API 호출 실패: {e}")
-        return []
-
-async def send_to_phi_server(raw_data_list: List[Dict]) -> List[Dict]:
-    try:
-        enriched_data_list = []
-        for raw_data in raw_data_list:
-            enriched_data = {
-                "id": raw_data.get("occrde", "") or str(uuid.uuid4()),
-                "occrde": raw_data.get("occrde", ""),
-                "nm": raw_data.get("nm", ""),
-                "age": raw_data.get("age", ""),
-                "ageNow": raw_data.get("ageNow", ""),
-                "sexdstnDscd": raw_data.get("sexdstnDscd", ""),
-                "occrAdres": raw_data.get("occrAdres", ""),
-                "writngTrgetDscd": raw_data.get("writngTrgetDscd", ""),
-                "alldressingDscd": raw_data.get("alldressingDscd", ""),
-                "etcSpfeatr": raw_data.get("etcSpfeatr", ""),
-                "height": raw_data.get("height", ""),
-                "bdwgh": raw_data.get("bdwgh", ""),
-                "frmDscd": raw_data.get("frmDscd", ""),
-                "faceshpeDscd": raw_data.get("faceshpeDscd", ""),
-                "hairshpeDscd": raw_data.get("hairshpeDscd", ""),
-                "haircolrDscd": raw_data.get("haircolrDscd", ""),
-                "tknphotolength": raw_data.get("tknphotolength", ""),
-                "tknphotoFile": raw_data.get("tknphotoFile", "")
-            }
-            
-            description_parts = []
-            if enriched_data["alldressingDscd"]:
-                description_parts.append(enriched_data["alldressingDscd"])
-            if enriched_data["etcSpfeatr"]:
-                description_parts.append(enriched_data["etcSpfeatr"])
-            if enriched_data["frmDscd"]:
-                description_parts.append(f"체격: {enriched_data['frmDscd']}")
-            if enriched_data["faceshpeDscd"]:
-                description_parts.append(f"얼굴형: {enriched_data['faceshpeDscd']}")
-            if enriched_data["hairshpeDscd"]:
-                description_parts.append(f"두발: {enriched_data['hairshpeDscd']}")
-            if enriched_data["haircolrDscd"]:
-                description_parts.append(f"두발색: {enriched_data['haircolrDscd']}")
-            
-            enriched_data["full_description"] = " ".join(description_parts)
-            enriched_data_list.append(enriched_data)
-        
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            start_time = time.time()
-            response = await client.post(
-                f"{PHI_SERVER_URL}/api/process_missing_persons",
-                json={"raw_data_list": enriched_data_list}
-            )
-            response_time = time.time() - start_time
-            
-            if response.status_code == 200:
-                processed_data = response.json()
-                await log_api_request("NER_SERVER", "POST", len(processed_data), True, response_time)
-                print(f"Phi 서버에서 {len(processed_data)}명의 데이터를 처리했습니다")
-                return processed_data
-            else:
-                await log_api_request("NER_SERVER", "POST", 0, False, response_time, f"HTTP {response.status_code}")
-                print(f"Phi 서버 오류: {response.status_code}")
-                return []
-                
-    except Exception as e:
-        await log_api_request("NER_SERVER", "POST", 0, False, 0, str(e))
-        log_system_event("ERROR", "NER_SERVER", f"연결 실패: {e}")
         return []
 
 def preprocess_address(address: str) -> str:
@@ -1103,49 +1031,66 @@ async def send_fcm_notification(person: MissingPerson, custom_message: str = Non
         log_system_event("ERROR", "FCM", f"전송 실패: {e}")
         return False
 
-async def log_api_request(endpoint: str, method: str, result_count: int, success: bool, response_time: float, error_message: str = None):
-    conn = sqlite3.connect('missing_persons.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO api_requests (request_time, endpoint, method, result_count, success, response_time, error_message)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        datetime.now().isoformat(),
-        endpoint,
-        method,
-        result_count,
-        1 if success else 0,
-        response_time,
-        error_message
-    ))
-    conn.commit()
-    conn.close()
+async def log_api_request(endpoint: str, method: str, count: int, success: bool, response_time: float, error: str = None):
+    """API 요청 로그 저장"""
+    try:
+        conn = sqlite3.connect('missing_persons.db')
+        cursor = conn.cursor()
+        
+        from datetime import datetime
+        timestamp = datetime.now().isoformat()
+        status_code = 200 if success else 500
+        
+        cursor.execute('''
+            INSERT INTO api_requests (timestamp, endpoint, method, status_code, response_time)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (timestamp, endpoint, method, status_code, response_time))
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        print(f"API 로그 저장 실패: {e}")
 
 async def start_optimized_polling():
-    print("최적화된 폴링 시작")
+    print("=" * 50)
+    print("✅ Safe182 폴링 시작")
+    print("=" * 50)
+    
+    # ✅ 첫 실행은 무조건 API 호출
+    first_run = True
     
     while True:
         try:
-            cached_data = api_manager.get_cached_data()
-            if cached_data:
-                print(f"캐시된 데이터 사용 중")
-                await asyncio.sleep(300)
-                continue
+            # ✅ 첫 실행은 캐시 무시
+            if not first_run:
+                cached_data = api_manager.get_cached_data()
+                if cached_data:
+                    print(f"💾 캐시된 데이터 사용 중 (5분 후 재확인)")
+                    await asyncio.sleep(300)
+                    continue
+                
+                if not api_manager.should_make_request():
+                    print("⏳ API 호출 제한, 1분 후 재시도")
+                    await asyncio.sleep(60)
+                    continue
             
-            if not api_manager.should_make_request():
-                await asyncio.sleep(60)
-                continue
+            first_run = False
             
+            print("🔄 Safe182 API 호출 중...")
             log_system_event("INFO", "POLLING", "Safe182 API 폴링 시작")
             raw_data_list = await fetch_safe182_data()
             
             if not raw_data_list:
+                print("⚠️  데이터 없음 (5분 후 재시도)")
                 await asyncio.sleep(300)
                 continue
             
-            api_manager.update_cache(raw_data_list)
+            print(f"✅ Safe182에서 {len(raw_data_list)}명의 데이터 수신")
             
-            processed_data = await send_to_phi_server(raw_data_list)
+            api_manager.update_cache(raw_data_list)
+            processed_data = raw_data_list
+
             if not processed_data:
                 await asyncio.sleep(300)
                 continue
@@ -1155,20 +1100,20 @@ async def start_optimized_polling():
             updated_persons = []
             
             for person_data in processed_data:
+                person_data.setdefault('extracted_features', {})
+
                 person = MissingPerson(**person_data)
                 
-                # 지오코딩 시도
                 if person.location:
                     coord = await geocode_address(person.location)
-                    if coord:  # 성공한 경우만 좌표 업데이트
+                    if coord:
                         person.lat = coord["lat"]
                         person.lng = coord["lng"]
                     else:
-                        # 실패 시 좌표를 None으로 설정하여 지도에 표시하지 않음
                         person.lat = None
                         person.lng = None
                         log_system_event("WARNING", "GEOCODING", 
-                                       f"좌표 변환 실패 - 지도 미표시: {person.name} ({person.location})")
+                                       f"좌표 변환 실패: {person.name}")
                 
                 save_missing_person(person)
                 
@@ -1178,6 +1123,7 @@ async def start_optimized_polling():
                     updated_persons.append(person)
             
             if new_persons or updated_persons:
+                print(f"📊 신규: {len(new_persons)}명, 갱신: {len(updated_persons)}명")
                 log_system_event("INFO", "POLLING", 
                                f"데이터 업데이트: 신규 {len(new_persons)}명, 갱신 {len(updated_persons)}명")
                 
@@ -1187,10 +1133,14 @@ async def start_optimized_polling():
                     "updated": len(updated_persons)
                 })
             
+            print("⏰ 5분 후 다시 확인...")
             await asyncio.sleep(300)
             
         except Exception as e:
+            print(f"❌ 폴링 오류: {e}")
             log_system_event("ERROR", "POLLING", f"폴링 오류: {e}")
+            import traceback
+            traceback.print_exc()
             await asyncio.sleep(60)
 
 async def cleanup_old_data():
@@ -1333,7 +1283,6 @@ async def create_missing_person(request: Dict[str, Any] = Body(...)):
         missing_person_data = request.get("missing_person", {})
         photo_data = request.get("photo_data")
         
-        # photo_data 처리 개선
         if photo_data:
             if not photo_data.startswith('data:'):
                 photo_data = f"data:image/jpeg;base64,{photo_data}"
@@ -1363,36 +1312,47 @@ async def create_missing_person(request: Dict[str, Any] = Body(...)):
         
         if missing_person.location:
             coord = await geocode_address(missing_person.location)
-            missing_person.lat = coord["lat"]
-            missing_person.lng = coord["lng"]
+            if coord:
+                missing_person.lat = coord["lat"]
+                missing_person.lng = coord["lng"]
         
-        # 데이터베이스 저장
         conn = sqlite3.connect('missing_persons.db')
         cursor = conn.cursor()
         
-        # INSERT 문에 approval_status 추가
+        # ✅ 24개 컬럼, 24개 값
         cursor.execute('''
             INSERT INTO missing_persons (
                 id, name, age, gender, location, description, photo_url, photo_base64,
-                priority, risk_factors, phi_entities, extracted_features, lat, lng,
+                priority, risk_factors, extracted_features, lat, lng,
                 created_at, updated_at, status, category, source, confidence_score,
                 last_seen, clothing_description, medical_condition, emergency_contact,
                 approval_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            missing_person.id, missing_person.name, missing_person.age, missing_person.gender,
-            missing_person.location, missing_person.description, missing_person.photo_url,
-            missing_person.photo_base64, missing_person.priority,
+            missing_person.id, 
+            missing_person.name, 
+            missing_person.age, 
+            missing_person.gender,
+            missing_person.location, 
+            missing_person.description, 
+            missing_person.photo_url,
+            missing_person.photo_base64, 
+            missing_person.priority,
             json.dumps(missing_person.risk_factors),
-            json.dumps(missing_person.phi_entities),
-            json.dumps(missing_person.extracted_features),
-            missing_person.lat, missing_person.lng,
-            missing_person.created_at, missing_person.updated_at,
-            "ACTIVE", missing_person.category, missing_person.source,
-            missing_person.confidence_score, missing_person.last_seen,
-            missing_person.clothing_description, missing_person.medical_condition,
+            json.dumps(missing_person.extracted_features or {}),
+            missing_person.lat, 
+            missing_person.lng,
+            missing_person.created_at, 
+            missing_person.updated_at,
+            "ACTIVE", 
+            missing_person.category, 
+            missing_person.source,
+            missing_person.confidence_score, 
+            missing_person.last_seen,
+            missing_person.clothing_description, 
+            missing_person.medical_condition,
             missing_person.emergency_contact,
-            "PENDING"  # 승인 대기 상태
+            "PENDING"
         ))
         
         conn.commit()
@@ -1407,11 +1367,14 @@ async def create_missing_person(request: Dict[str, Any] = Body(...)):
         
         return {
             "success": True,
-            "message": "실종자 신고가 접수되었습니다. 관리자의 승인을 기다려주세요.",
+            "message": "실종자 신고가 접수되었습니다.",
             "person_id": person_id
         }
         
     except Exception as e:
+        print(f"❌ 신고 접수 오류: {e}")
+        import traceback
+        traceback.print_exc()
         log_system_event("ERROR", "REPORT", f"신고 접수 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1542,7 +1505,7 @@ async def get_person_detail(person_id: str):
         
         cursor.execute('''
             SELECT id, name, age, gender, location, description, photo_url, photo_base64,
-                   priority, risk_factors, phi_entities, extracted_features, lat, lng,
+                   priority, risk_factors, extracted_features, lat, lng,
                    created_at, updated_at, status, category, source, confidence_score,
                    last_seen, clothing_description, medical_condition, emergency_contact,
                    approval_status, rejection_reason
@@ -1560,7 +1523,6 @@ async def get_person_detail(person_id: str):
         
         try:
             person['risk_factors'] = json.loads(person.get('risk_factors') or '[]')
-            person['phi_entities'] = json.loads(person.get('phi_entities') or '{}')
             person['extracted_features'] = json.loads(person.get('extracted_features') or '{}')
         except:
             pass
@@ -1718,14 +1680,11 @@ async def send_custom_notification(request: NotificationRequest):
         try:
             if isinstance(person_dict.get('risk_factors'), str):
                 person_dict['risk_factors'] = json.loads(person_dict['risk_factors']) if person_dict['risk_factors'] else []
-            if isinstance(person_dict.get('phi_entities'), str):
-                person_dict['phi_entities'] = json.loads(person_dict['phi_entities']) if person_dict['phi_entities'] else {}
             if isinstance(person_dict.get('extracted_features'), str):
                 person_dict['extracted_features'] = json.loads(person_dict['extracted_features']) if person_dict['extracted_features'] else {}
         except json.JSONDecodeError as e:
             print(f"JSON 파싱 오류: {e}")
             person_dict['risk_factors'] = []
-            person_dict['phi_entities'] = {}
             person_dict['extracted_features'] = {}
         
         person = MissingPerson(**person_dict)
@@ -2064,15 +2023,11 @@ async def force_update():
         if not raw_data_list:
             return {"status": "error", "message": "Safe182 API에서 데이터를 가져올 수 없습니다"}
         
-        processed_data = await send_to_phi_server(raw_data_list)
-        if not processed_data:
-            return {"status": "error", "message": "Phi 서버에서 데이터 처리에 실패했습니다"}
-        
         existing_ids = get_existing_person_ids()
         new_count = 0
         updated_count = 0
         
-        for person_data in processed_data:
+        for person_data in raw_data_list:
             person = MissingPerson(**person_data)
             
             coord = await geocode_address(person.location)
@@ -2113,7 +2068,6 @@ async def health_check():
     except:
         db_status = "unhealthy"
     
-    Phi_status = "healthy" if await check_phi_server() else "unhealthy"
     firebase_status = "healthy" if firebase_messaging else "unhealthy"
     
     return {
@@ -2121,7 +2075,6 @@ async def health_check():
         "timestamp": datetime.now().isoformat(),
         "components": {
             "database": db_status,
-            "Phi_server": Phi_status,
             "firebase": firebase_status,
             "api_manager": "healthy"
         },
@@ -2605,6 +2558,164 @@ async def get_all_cctvs():
 async def favicon():
     return FileResponse("static/favicon.ico")
 
+@app.post("/api/get_environment")
+async def get_environment(request: dict):
+    """실종 위치 기준 동서남북 환경 분석"""
+    try:
+        lat = request.get("lat")
+        lon = request.get("lon")
+        
+        print(f"🗺️  환경 분석: ({lat}, {lon})")
+        
+        # 500m 반경
+        radius = 500
+        
+        # 각 방향별 환경
+        directions = {
+            "north": {"angle": 0, "lat_offset": 0.0045, "lon_offset": 0},
+            "east": {"angle": 90, "lat_offset": 0, "lon_offset": 0.006},
+            "south": {"angle": 180, "lat_offset": -0.0045, "lon_offset": 0},
+            "west": {"angle": 270, "lat_offset": 0, "lon_offset": -0.006}
+        }
+        
+        result = {}
+        
+        for direction, offset in directions.items():
+            target_lat = lat + offset["lat_offset"]
+            target_lon = lon + offset["lon_offset"]
+            
+            try:
+                # 해당 방향 지점 반경 200m OSM 데이터
+                tags = {
+                    'highway': True,
+                    'landuse': True,
+                    'amenity': True,
+                    'natural': True,
+                    'building': True
+                }
+                
+                gdf = ox.features_from_point((target_lat, target_lon), tags=tags, dist=200)
+                
+                # 도로 타입
+                road_type = "골목길"
+                if not gdf.empty and 'highway' in gdf.columns:
+                    highways = gdf['highway'].dropna()
+                    if len(highways) > 0:
+                        hw = str(highways.iloc[0])
+                        if 'primary' in hw or 'trunk' in hw:
+                            road_type = "대로"
+                        elif 'secondary' in hw or 'tertiary' in hw:
+                            road_type = "이차로"
+                
+                # 토지 이용
+                land_use = "주거지역"
+                if not gdf.empty and 'landuse' in gdf.columns:
+                    landuses = gdf['landuse'].dropna()
+                    if len(landuses) > 0:
+                        lu = str(landuses.iloc[0])
+                        if 'commercial' in lu or 'retail' in lu:
+                            land_use = "상업지역"
+                        elif 'industrial' in lu:
+                            land_use = "공업지역"
+                        elif 'park' in lu or 'recreation' in lu:
+                            land_use = "공원"
+                
+                # POI
+                poi = []
+                if not gdf.empty and 'amenity' in gdf.columns:
+                    amenities = gdf['amenity'].dropna().unique()
+                    for a in amenities[:3]:
+                        if 'school' in str(a):
+                            poi.append("학교")
+                        elif 'hospital' in str(a):
+                            poi.append("병원")
+                        elif 'bus' in str(a):
+                            poi.append("버스정류장")
+                        elif 'park' in str(a):
+                            poi.append("공원")
+                        elif 'convenience' in str(a) or 'shop' in str(a):
+                            poi.append("편의점")
+                
+                if not poi:
+                    poi = ["없음"]
+                
+                # 위험 요소
+                hazard = []
+                if not gdf.empty and 'natural' in gdf.columns:
+                    naturals = gdf['natural'].dropna()
+                    if any('water' in str(n) or 'river' in str(n) for n in naturals):
+                        hazard.append("하천")
+                
+                if not gdf.empty and 'highway' in gdf.columns:
+                    highways = gdf['highway'].dropna()
+                    if any('motorway' in str(h) or 'trunk' in str(h) for h in highways):
+                        hazard.append("대형교차로")
+                
+                if not hazard:
+                    hazard = ["없음"]
+                
+                result[direction] = {
+                    "road_type": road_type,
+                    "land_use": land_use,
+                    "poi": poi,
+                    "hazard": hazard,
+                    "slope": "평지"
+                }
+                
+            except Exception as e:
+                print(f"⚠️  {direction} 방향 데이터 없음: {e}")
+                result[direction] = {
+                    "road_type": "골목길",
+                    "land_use": "주거지역",
+                    "poi": ["없음"],
+                    "hazard": ["없음"],
+                    "slope": "평지"
+                }
+        
+        print(f"✅ 환경 분석 완료")
+        return {"success": True, "environment": result}
+        
+    except Exception as e:
+        print(f"❌ 환경 분석 오류: {e}")
+        return {"success": False, "error": str(e)}
+    
+def translate_to_english(text: str) -> str:
+    """DeepL로 한글을 영어로 번역"""
+    if not text or not text.strip():
+        return ""
+    
+    # 이미 영어면 그대로 반환
+    if all(ord(c) < 128 for c in text if c.isalpha()):
+        return text
+    
+    try:
+        print(f"[DeepL] 번역 시도: {text}")
+        
+        url = "https://api-free.deepl.com/v2/translate"
+        params = {
+            "auth_key": DEEPL_API_KEY,
+            "text": text,
+            "source_lang": "KO",
+            "target_lang": "EN-US"
+        }
+        
+        response = requests.post(url, data=params, timeout=10)
+        response.raise_for_status()
+        
+        result = response.json()
+        translated = result["translations"][0]["text"]
+        
+        print(f"[DeepL] 번역 완료: {translated}")
+        return translated
+        
+    except requests.exceptions.RequestException as e:
+        print(f"DeepL API 오류: {e}")
+        print(f"   원문 사용: {text}")
+        return text
+    except Exception as e:
+        print(f"번역 실패: {e}")
+        return text
+
 @app.get("/")
 async def get_admin_dashboard():
     import os
@@ -2631,7 +2742,6 @@ if __name__ == "__main__":
     print("대전 이동 안전망 시스템을 시작합니다")
     print("=" * 50)
     print("포트: 8001")
-    print("먼저 Phi_server.py (포트 8000)가 실행되어 있는지 확인하세요")
     print(f"카카오 API 키 설정 상태: {'설정됨' if KAKAO_JAVASCRIPT_KEY else '미설정'}")
     print(f"Firebase 설정 상태: {'설정됨' if FIREBASE_CREDENTIALS else '미설정'}")
     print(f"ITS CCTV API 설정 상태: {'설정됨' if ITS_CCTV_API_KEY else '미설정'}")
