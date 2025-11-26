@@ -394,6 +394,25 @@ async def init_database():
         )
     ''')
     
+    # fcm_tokens 테이블 마이그레이션
+    cursor.execute("PRAGMA table_info(fcm_tokens)")
+    fcm_columns = [column[1] for column in cursor.fetchall()]
+    
+    fcm_new_columns = [
+        ('active', 'INTEGER DEFAULT 1'),
+        ('location_lat', 'REAL'),
+        ('location_lng', 'REAL')
+    ]
+    
+    for column_name, column_type in fcm_new_columns:
+        if column_name not in fcm_columns:
+            try:
+                cursor.execute(f'ALTER TABLE fcm_tokens ADD COLUMN {column_name} {column_type}')
+                print(f"fcm_tokens 테이블에 {column_name} 컬럼이 추가되었습니다.")
+            except sqlite3.OperationalError as e:
+                if "duplicate column name" not in str(e):
+                    raise e
+    
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -535,7 +554,8 @@ def save_missing_person(person: MissingPerson):
         (id, name, age, gender, location, description, photo_url, photo_base64, 
          priority, risk_factors, extracted_features, lat, lng, 
          created_at, updated_at, status, category, source, confidence_score,
-         last_seen, clothing_description, medical_condition, emergency_contact, approval_status)
+         last_seen, clothing_description, medical_condition, emergency_contact, 
+         approval_status, rejection_reason)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         person.id, person.name, person.age, person.gender, person.location,
@@ -545,7 +565,7 @@ def save_missing_person(person: MissingPerson):
         person.lat, person.lng, person.created_at, current_time, person.status, 
         person.category, person.source, person.confidence_score,
         person.last_seen, person.clothing_description, person.medical_condition,
-        person.emergency_contact, approval_status
+        person.emergency_contact, approval_status, None  # ✅ rejection_reason 추가 (NULL)
     ))
     
     conn.commit()
@@ -1087,22 +1107,62 @@ async def start_optimized_polling():
                 continue
             
             print(f"✅ Safe182에서 {len(raw_data_list)}명의 데이터 수신")
-            
+
             api_manager.update_cache(raw_data_list)
-            processed_data = raw_data_list
+
+            # ✅ Safe182 필드명 → MissingPerson 필드명 변환
+            processed_data = []
+            for item in raw_data_list:
+                mapped = {
+                    'name': item.get('nm', '이름 미상'),  # nm → name
+                    'age': item.get('age'),
+                    'gender': item.get('sexdstnDscd', ''),  # 성별 구분 코드
+                    'location': item.get('occrAdres', ''),  # 발생 주소
+                    'description': item.get('etc', ''),  # 기타 사항
+                    'photo_url': item.get('tknphotoFile', ''),  # 사진 파일
+                    'photo_base64': None,
+                    'priority': 'MEDIUM',
+                    'risk_factors': [],
+                    'extracted_features': {},
+                    'status': 'ACTIVE',
+                    'source': 'SAFE182',
+                    'category': None,
+                    'created_at': datetime.now().isoformat(),
+                    'last_seen': item.get('occrde', ''),  # 발생 일자
+                    'clothing_description': item.get('dressingDscd', ''),  # 복장
+                    'medical_condition': None,
+                    'emergency_contact': None,
+                    'lat': 36.3504,  # 대전 기본 좌표
+                    'lng': 127.3845,
+                    'confidence_score': None
+                }
+                processed_data.append(mapped)
 
             if not processed_data:
                 await asyncio.sleep(300)
                 continue
-            
+
             existing_ids = get_existing_person_ids()
             new_persons = []
             updated_persons = []
-            
+
             for person_data in processed_data:
                 person_data.setdefault('extracted_features', {})
-
+                
+                # Safe182 데이터에는 id가 없으므로 생성
+                if 'id' not in person_data or not person_data['id']:
+                    if 'writeSn' in person_data and person_data['writeSn']:
+                        person_data['id'] = f"SAFE182_{person_data['writeSn']}"
+                    else:
+                        import hashlib
+                        unique_str = f"{person_data.get('name', '')}_{person_data.get('last_seen', '')}_{person_data.get('location', '')}"
+                        person_data['id'] = f"SAFE182_{hashlib.md5(unique_str.encode()).hexdigest()[:12]}"
+                
                 person = MissingPerson(**person_data)
+                
+                # Safe182 데이터의 category 재분류 (ISRID 기준)
+                if person.age:
+                    person.category = _categorize_person(person.age, person.medical_condition)
                 
                 if person.location:
                     coord = await geocode_address(person.location)
@@ -1113,7 +1173,7 @@ async def start_optimized_polling():
                         person.lat = None
                         person.lng = None
                         log_system_event("WARNING", "GEOCODING", 
-                                       f"좌표 변환 실패: {person.name}")
+                                    f"좌표 변환 실패: {person.name}")
                 
                 save_missing_person(person)
                 
@@ -1305,7 +1365,10 @@ async def create_missing_person(request: Dict[str, Any] = Body(...)):
             created_at=current_time,
             updated_at=current_time,
             source="REPORTER",
-            category=_categorize_by_age(missing_person_data.get("age", 0)),
+            category=_categorize_person(
+                missing_person_data.get("age", 0),
+                missing_person_data.get("medical_condition"),
+            ),
             last_seen=missing_person_data.get("missing_datetime"),
             emergency_contact=missing_person_data.get("reporter_phone")
         )
@@ -1438,12 +1501,15 @@ async def handle_sighting_report(message: dict):
     conn = sqlite3.connect('missing_persons.db')
     cursor = conn.cursor()
     
+    report_id = str(uuid.uuid4())  # UUID 생성
+    
     cursor.execute('''
         INSERT INTO sighting_reports 
-        (person_id, reporter_id, reporter_lat, reporter_lng, description, photo_base64, 
+        (id, person_id, reporter_id, reporter_lat, reporter_lng, description, photo_base64, 
          confidence_level, reported_at, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
     ''', (
+        report_id,  # id 추가
         report_data.person_id,
         report_data.reporter_id,
         report_data.reporter_location.get("lat"),
@@ -1487,13 +1553,26 @@ async def get_missing_persons_api(
         log_system_event("ERROR", "API", f"실종자 목록 조회 실패: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     
-def _categorize_by_age(age: int) -> str:
+def _categorize_person(age: int, medical_condition: str = None) -> str:
+    """
+    나이와 의료 상태를 기반으로 실종자 분류
+    ISRID (International Search & Rescue Incident Database) 기준 적용
+    """
     if age <= 6:
         return '미취학아동'
+    elif age <= 9:
+        return '초등저학년'
+    elif age <= 12:
+        return '초등고학년'
     elif age <= 18:
-        return '학령기아동'
+        return '중고등학생'
     elif age >= 65:
-        return '치매환자'
+        # 의료 상태 확인
+        if medical_condition:
+            medical_lower = medical_condition.lower()
+            if any(keyword in medical_lower for keyword in ['치매', 'dementia', '알츠하이머', 'alzheimer', '인지장애']):
+                return '치매환자'
+        return '고령자'
     else:
         return '성인가출'
 
@@ -1587,13 +1666,15 @@ async def report_sighting(request: ReportRequest):
         cursor = conn.cursor()
         
         current_time = datetime.now().isoformat()
+        report_id = str(uuid.uuid4())  # UUID 생성
         
         cursor.execute('''
             INSERT INTO sighting_reports 
-            (person_id, reporter_id, reporter_lat, reporter_lng, description, photo_base64, 
+            (id, person_id, reporter_id, reporter_lat, reporter_lng, description, photo_base64, 
              confidence_level, reported_at, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
         ''', (
+            report_id,  # id 추가
             request.person_id,
             request.reporter_id,
             request.reporter_location.get("lat"),
@@ -1604,7 +1685,6 @@ async def report_sighting(request: ReportRequest):
             current_time
         ))
         
-        report_id = cursor.lastrowid
         conn.commit()
         conn.close()
         
@@ -1616,14 +1696,19 @@ async def report_sighting(request: ReportRequest):
             "person_id": request.person_id,
             "location": request.reporter_location,
             "confidence": request.confidence_level,
-            "description": request.description,
             "timestamp": current_time
         })
         
-        return {"status": "success", "message": "목격 신고가 접수되었습니다", "report_id": report_id}
+        return {
+            "status": "success",
+            "message": "목격 신고가 접수되었습니다",
+            "report_id": report_id
+        }
         
     except Exception as e:
-        log_system_event("ERROR", "SIGHTING", f"목격 신고 실패: {e}")
+        print(f"목격 신고 처리 오류: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/active_tokens")
@@ -2300,13 +2385,13 @@ async def get_sighting_reports(status: str = "all"):
                     sr.id,
                     sr.person_id,
                     sr.reporter_id,
-                    sr.reporter_lat as lat,
-                    sr.reporter_lng as lng,
+                    sr.reporter_lat,
+                    sr.reporter_lng,
                     sr.description,
-                    sr.photo_base64 as report_photo,
+                    sr.photo_base64,
                     sr.confidence_level,
                     sr.status,
-                    sr.reported_at as created_at,
+                    sr.reported_at,
                     mp.name as person_name,
                     mp.photo_base64 as person_photo
                 FROM sighting_reports sr
@@ -2320,13 +2405,13 @@ async def get_sighting_reports(status: str = "all"):
                     sr.id,
                     sr.person_id,
                     sr.reporter_id,
-                    sr.reporter_lat as lat,
-                    sr.reporter_lng as lng,
+                    sr.reporter_lat,
+                    sr.reporter_lng,
                     sr.description,
-                    sr.photo_base64 as report_photo,
+                    sr.photo_base64,
                     sr.confidence_level,
                     sr.status,
-                    sr.reported_at as created_at,
+                    sr.reported_at,
                     mp.name as person_name,
                     mp.photo_base64 as person_photo
                 FROM sighting_reports sr
@@ -2382,12 +2467,11 @@ async def get_sighting_report_by_id(report_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.patch("/api/sighting_report/{report_id}/status")
-async def update_report_status(report_id: int, status: str):
+async def update_report_status(report_id: str, status: str):  # int → str
     try:
         conn = sqlite3.connect('missing_persons.db')
         cursor = conn.cursor()
         
-        # 신고 정보 가져오기
         cursor.execute('SELECT person_id FROM sighting_reports WHERE id = ?', (report_id,))
         report = cursor.fetchone()
         
@@ -2397,14 +2481,12 @@ async def update_report_status(report_id: int, status: str):
         
         person_id = report[0]
         
-        # 상태 업데이트
         cursor.execute('''
             UPDATE sighting_reports 
             SET status = ?
             WHERE id = ?
         ''', (status, report_id))
         
-        # CONFIRMED 상태가 되면 실종자도 "찾음" 상태로 변경
         if status == 'CONFIRMED':
             cursor.execute('''
                 UPDATE missing_persons 
@@ -2414,7 +2496,6 @@ async def update_report_status(report_id: int, status: str):
             
             log_system_event("UPDATE", "MISSING_PERSON", f"실종자 {person_id} - 목격 확인됨으로 상태 변경")
             
-            # WebSocket으로 실시간 알림
             await manager.broadcast({
                 "type": "person_found",
                 "person_id": person_id,
@@ -2444,7 +2525,7 @@ async def update_report_status(report_id: int, status: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/sighting_report/{report_id}")
-async def delete_sighting_report(report_id: int):
+async def delete_sighting_report(report_id: str):  # int → str
     try:
         print(f"신고 삭제 요청: ID {report_id}")
         

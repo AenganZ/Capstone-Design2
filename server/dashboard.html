@@ -1111,17 +1111,6 @@
                         <button type="submit" class="btn btn-primary">기사 등록</button>
                     </form>
                 </div>
-                
-                <div class="sidebar-section">
-                    <h2 class="section-title">선택된 기사에게 메시지</h2>
-                    <div class="notification-form">
-                        <div class="form-group">
-                            <label class="form-label">메시지 내용</label>
-                            <textarea class="form-input" id="messageContent" rows="3" placeholder="기사에게 보낼 메시지를 입력하세요..."></textarea>
-                        </div>
-                        <button type="button" class="btn btn-primary" onclick="sendDriverMessage()">메시지 전송</button>
-                    </div>
-                </div>
             </div>
             
             <div id="cctv-tab" class="tab-content">
@@ -1474,11 +1463,17 @@
                 '062': 3840,
                 '063': 8000,
                 '미취학아동': 1600,
-                '학령기아동': 1600,
+                '초등저학년': 2500,
+                '초등고학년': 4000,
+                '중고등학생': 6500,
                 '치매환자': 3840,
-                '성인가출': 8000
+                '고령자': 5000,
+                '지적장애인': 2000,
+                '자폐장애인': 1800,
+                '성인가출': 8000,
+                '기타': 3000
             };
-            return radiusMap[category] || 2000;
+            return radiusMap[category] || 3000;
         }
 
         function loadCCTVPersonList() {
@@ -1735,22 +1730,6 @@
             
             admin.showToast(`기사 ${name}님이 등록되었습니다.`, 'success');
             document.getElementById('driverForm').reset();
-        }
-        
-        function sendDriverMessage() {
-            const message = document.getElementById('messageContent').value.trim();
-            if (!message) {
-                admin.showToast('메시지 내용을 입력해주세요.', 'error');
-                return;
-            }
-            
-            admin.addActivity({
-                time: new Date().toLocaleTimeString(),
-                content: `기사에게 메시지 전송: ${message.substring(0, 30)}${message.length > 30 ? '...' : ''}`
-            });
-            
-            admin.showToast('메시지를 전송했습니다.', 'success');
-            document.getElementById('messageContent').value = '';
         }
         
         async function searchNearbyCCTVs() {
@@ -2137,22 +2116,28 @@
                 this.movementOverlays = [];
                 
                 this.SEARCH_RADIUS_BY_CATEGORY = {
-                    '미취학아동': 1600,
-                    '학령기아동': 1600,
-                    '치매환자': 3840,
-                    '지적장애인': 2000,
-                    '자폐장애인': 1800,
-                    '성인가출': 8000,
+                    '미취학아동': 1600,      // ISRID: 1~6세
+                    '초등저학년': 2500,      // ISRID: 7~9세 (2~3km)
+                    '초등고학년': 4000,      // ISRID: 10~12세 (3~5km)
+                    '중고등학생': 6500,      // ISRID: 13~18세 (5~8km)
+                    '치매환자': 3840,        // 경찰청 연구: 부산 지역 실증 데이터
+                    '고령자': 5000,          // 65세 이상 일반
+                    '지적장애인': 2000,      // ISRID
+                    '자폐장애인': 1800,      // ISRID
+                    '성인가출': 8000,        // ISRID + 한국 경찰청
                     '기타': 3000
                 };
 
                 this.SEARCH_DESCRIPTIONS = {
-                    '미취학아동': '연구에 따르면 미취학 아동의 절반 이상이 1.6km 이내에서 발견됩니다. 골든타임: 3시간',
-                    '학령기아동': '학령기 아동은 단축로 이용 중 실종되는 경우가 많습니다. 골든타임: 48시간',
-                    '치매환자': '부산 지역 연구 결과 평균 3.84km 내에서 발견됩니다. 연령대별로 차이가 있습니다. 골든타임: 48-72시간',
-                    '지적장애인': '제한적 이동 능력을 고려한 범위입니다. 골든타임: 48-72시간',
-                    '자폐장애인': '의사소통 어려움으로 수색이 복잡합니다. 골든타임: 48-72시간',
-                    '성인가출': '의도적 이동으로 넓은 수색 범위가 필요합니다. 골든타임: 24시간',
+                    '미취학아동': 'ISRID 데이터: 1~6세 아동의 50% 이상이 1.6km 이내에서 발견. 숨어서 잠자는 경향. 골든타임: 3시간',
+                    '초등저학년': 'ISRID 데이터: 7~9세 아동은 평균 2~3km 이동. 호기심으로 탐험하다 길을 잃는 경우 많음. 골든타임: 24시간',
+                    '초등고학년': 'ISRID 데이터: 10~12세는 평균 3~5km 이동. 모험심 강하며 결정 지점에서 잘못된 선택. 골든타임: 48시간',
+                    '중고등학생': 'ISRID 데이터: 13~18세는 평균 5~8km 이동. 의도적 가출과 사고성 실종 혼재. 골든타임: 48시간',
+                    '치매환자': '경찰청 연구 (2018-2021, n=37,619): 부산 지역 평균 발견 거리 3.84km. 직선 이동 후 장애물에 멈춤. 골든타임: 24-72시간',
+                    '고령자': '65세 이상 일반 노인. 치매 환자보다 이동 거리 길지만 체력 제한. 골든타임: 48시간',
+                    '지적장애인': 'ISRID 데이터: 제한적 이동 능력, 방향 감각 부족. 골든타임: 48-72시간',
+                    '자폐장애인': 'ISRID 데이터: 수색대 호출에 응답 없음, 물에 끌리는 경향. 골든타임: 48-72시간',
+                    '성인가출': 'ISRID 데이터: 의도적 이동으로 평균 8km 이상. 교통수단 이용 시 범위 확장. 골든타임: 24시간',
                     '기타': '평균적인 수색 범위를 적용합니다.'
                 };
 
@@ -2213,12 +2198,20 @@
                 
                 if (!category || category === 'null' || category === '기타') {
                     if (person.age) {
-                        if (person.age <= 8) {
-                            category = '미취학아동';
-                        } else if (person.age <= 18) {
-                            category = '학령기아동';
-                        } else if (person.age >= 65) {
-                            category = '치매환자';
+                        if (person.age <= 6) category = '미취학아동';
+                        else if (person.age <= 9) category = '초등저학년';
+                        else if (person.age <= 12) category = '초등고학년';
+                        else if (person.age <= 18) category = '중고등학생';
+                        else if (person.age >= 65) {
+                            // medical_condition 확인
+                            if (person.medical_condition && 
+                                (person.medical_condition.includes('치매') || 
+                                person.medical_condition.includes('dementia') ||
+                                person.medical_condition.includes('알츠하이머'))) {
+                                category = '치매환자';
+                            } else {
+                                category = '고령자';
+                            }
                         } else {
                             category = '성인가출';
                         }
@@ -2235,12 +2228,23 @@
                 
                 if (!category || category === 'null' || category === '기타') {
                     if (person.age) {
-                        if (person.age <= 8) {
+                        if (person.age <= 6) {
                             category = '미취학아동';
+                        } else if (person.age <= 9) {
+                            category = '초등저학년';
+                        } else if (person.age <= 12) {
+                            category = '초등고학년';
                         } else if (person.age <= 18) {
-                            category = '학령기아동';
+                            category = '중고등학생';
                         } else if (person.age >= 65) {
-                            category = '치매환자';
+                            if (person.medical_condition && 
+                                (person.medical_condition.includes('치매') || 
+                                person.medical_condition.includes('dementia') ||
+                                person.medical_condition.includes('알츠하이머'))) {
+                                category = '치매환자';
+                            } else {
+                                category = '고령자';
+                            }
                         } else {
                             category = '성인가출';
                         }
@@ -2701,8 +2705,10 @@
                 let displayCategory = person.category;
                 if (!displayCategory || displayCategory === 'null' || displayCategory === '기타') {
                     if (person.age) {
-                        if (person.age <= 8) displayCategory = '미취학아동';
-                        else if (person.age <= 18) displayCategory = '학령기아동';
+                        if (person.age <= 6) displayCategory = '미취학아동';
+                        else if (person.age <= 9) displayCategory = '초등저학년';
+                        else if (person.age <= 12) displayCategory = '초등고학년';
+                        else if (person.age <= 18) displayCategory = '중고등학생';
                         else if (person.age >= 65) displayCategory = '고령자';
                         else displayCategory = '성인';
                     } else {
@@ -3310,8 +3316,10 @@
                     let displayCategory = person.category;
                     if (!displayCategory || displayCategory === 'null' || displayCategory === '기타') {
                         if (person.age) {
-                            if (person.age <= 8) displayCategory = '미취학아동';
-                            else if (person.age <= 18) displayCategory = '학령기아동';
+                            if (person.age <= 6) displayCategory = '미취학아동';
+                            else if (person.age <= 9) displayCategory = '초등저학년';
+                            else if (person.age <= 12) displayCategory = '초등고학년';
+                            else if (person.age <= 18) displayCategory = '중고등학생';
                             else if (person.age >= 65) displayCategory = '고령자';
                             else displayCategory = '성인';
                         } else {
@@ -4310,8 +4318,8 @@
                     }[report.confidence_level] || '보통';
                     
                     let photoHtml = '';
-                    if (report.photo_base64) {
-                        let photoSrc = report.photo_base64;
+                    if (report.person_photo) {
+                        let photoSrc = report.person_photo;
                         if (!photoSrc.startsWith('data:')) {
                             photoSrc = `data:image/jpeg;base64,${photoSrc}`;
                         }
@@ -4363,25 +4371,28 @@
                                 <div><strong>설명:</strong> ${description}</div>
                             </div>
                             
-                            ${report.status === 'PENDING' ? `
-                                <div style="display: flex; gap: 8px; justify-content: flex-end;">
-                                    <button style="padding: 6px 12px; font-size: 12px; border: none; border-radius: 6px; cursor: pointer; background: #6b7280; color: white;" onclick="updateReportStatus(${report.id}, 'REVIEWING')">
-                                        검토중
-                                    </button>
-                                    <button style="padding: 6px 12px; font-size: 12px; border: none; border-radius: 6px; cursor: pointer; background: #10b981; color: white;" onclick="confirmReport(${report.id}, '${personName}')">
-                                        발견 확인
-                                    </button>
-                                    <button style="padding: 6px 12px; font-size: 12px; border: none; border-radius: 6px; cursor: pointer; background: #ef4444; color: white;" onclick="updateReportStatus(${report.id}, 'REJECTED')">
-                                        기각
-                                    </button>
-                                </div>
-                            ` : `
-                                <div style="display: flex; gap: 8px; justify-content: flex-end;">
-                                    <button style="padding: 6px 12px; font-size: 12px; border: none; border-radius: 6px; cursor: pointer; background: #ef4444; color: white;" onclick="deleteReport(${report.id})">
-                                        삭제
-                                    </button>
-                                </div>
-                            `}
+                            ${report.status === 'PENDING' || report.status === 'REVIEWING' ?
+                                `
+                                    <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                                        ${report.status === 'PENDING' ? `
+                                            <button style="padding: 6px 12px; font-size: 12px; border: none; border-radius: 6px; cursor: pointer; background: #6b7280; color: white;" onclick="updateReportStatus('${report.id}', 'REVIEWING')">
+                                                검토중
+                                            </button>
+                                        ` : ''}
+                                        <button style="padding: 6px 12px; font-size: 12px; border: none; border-radius: 6px; cursor: pointer; background: #10b981; color: white;" onclick="confirmReport('${report.id}', '${personName}')">
+                                            발견 확인
+                                        </button>
+                                        <button style="padding: 6px 12px; font-size: 12px; border: none; border-radius: 6px; cursor: pointer; background: #ef4444; color: white;" onclick="updateReportStatus('${report.id}', 'REJECTED')">
+                                            기각
+                                        </button>
+                                    </div>
+                                ` : `
+                                    <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                                        <button style="padding: 6px 12px; font-size: 12px; border: none; border-radius: 6px; cursor: pointer; background: #ef4444; color: white;" onclick="deleteReport('${report.id}')">
+                                            삭제
+                                        </button>
+                                    </div>
+                                `}
                         </div>
                     `;
                 }).join('');
